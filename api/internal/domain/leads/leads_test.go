@@ -20,7 +20,7 @@ func testEmail(t *testing.T) shared.EmailAddress {
 func TestCaptureRecordsConsentEvidence(t *testing.T) {
 	at := time.Date(2026, time.March, 2, 15, 4, 5, 0, time.UTC)
 
-	lead, err := Capture(testEmail(t), "landing-gratis", at, "203.0.113.7")
+	lead, err := Capture(testEmail(t), "landing-gratis", at, "203.0.113.7", "hash")
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCaptureRejectsMissingConsentEvidence(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lead, err := Capture(testEmail(t), "landing-gratis", tt.consentAt, tt.consentIP)
+			lead, err := Capture(testEmail(t), "landing-gratis", tt.consentAt, tt.consentIP, "hash")
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
@@ -66,7 +66,7 @@ func TestCaptureRejectsMissingConsentEvidence(t *testing.T) {
 
 func TestConfirmIsIdempotent(t *testing.T) {
 	at := time.Date(2026, time.March, 2, 15, 4, 5, 0, time.UTC)
-	lead, err := Capture(testEmail(t), "landing-gratis", at, "203.0.113.7")
+	lead, err := Capture(testEmail(t), "landing-gratis", at, "203.0.113.7", "hash")
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}

@@ -25,6 +25,8 @@ func (k Kind) IsPack() bool     { return k == KindPack }
 // Product is a sellable item. Exactly one side of the payload is populated,
 // depending on Kind: FileKey for a material, Credits and ValidityDays for a
 // pack. ValidityDays zero means the credits never expire.
+// Active controls whether the product appears in the shop. Products are
+// deactivated rather than deleted, because past orders still reference them.
 type Product struct {
 	ID           shared.ID
 	Slug         string
@@ -34,6 +36,7 @@ type Product struct {
 	FileKey      string
 	Credits      int
 	ValidityDays int
+	Active       bool
 }
 
 // NewProduct validates the shape of a product and returns it as a value.
@@ -68,5 +71,18 @@ func NewProduct(id shared.ID, slug, title string, price shared.Money, kind Kind,
 		FileKey:      fileKey,
 		Credits:      credits,
 		ValidityDays: validityDays,
+		Active:       true,
 	}, nil
+}
+
+// Deactivate takes a product off sale without deleting it.
+func (p Product) Deactivate() Product {
+	p.Active = false
+	return p
+}
+
+// Activate puts a product back on sale.
+func (p Product) Activate() Product {
+	p.Active = true
+	return p
 }

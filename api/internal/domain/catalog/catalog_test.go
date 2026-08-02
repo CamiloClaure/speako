@@ -33,6 +33,8 @@ func TestNewProductValid(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewProduct: %v", err)
 			}
+			// A new product is on sale by default; retiring it is explicit.
+			p.Active = true
 			if got != p {
 				t.Fatalf("NewProduct = %+v, want %+v", got, p)
 			}
@@ -79,5 +81,25 @@ func TestKindPredicates(t *testing.T) {
 	}
 	if !KindPack.IsPack() || KindPack.IsMaterial() {
 		t.Fatal("KindPack must be pack and not material")
+	}
+}
+
+func TestActivateDeactivate(t *testing.T) {
+	p, err := NewProduct("p1", "guia", "Guia", shared.NewMoney(4700), KindMaterial, "files/guia.pdf", 0, 0)
+	if err != nil {
+		t.Fatalf("NewProduct: %v", err)
+	}
+	if !p.Active {
+		t.Fatal("a new product must be on sale")
+	}
+	retired := p.Deactivate()
+	if retired.Active {
+		t.Error("Deactivate left the product on sale")
+	}
+	if !p.Active {
+		t.Error("Deactivate mutated the receiver")
+	}
+	if !retired.Activate().Active {
+		t.Error("Activate did not put it back on sale")
 	}
 }
