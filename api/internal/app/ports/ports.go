@@ -65,6 +65,19 @@ type OrderRepo interface {
 	ListPendingBefore(ctx context.Context, before time.Time) ([]ordering.Order, error)
 }
 
+// PaymentEventRepo records which gateway events have already been applied.
+//
+// This is what makes webhook handling safe, and it has to be a storage-level
+// claim rather than a status check: gateways retry aggressively, and two
+// deliveries of the same event can be in flight at once. Checking the order
+// status first would let both readers see "pending" and both grant credits.
+type PaymentEventRepo interface {
+	// Claim records eventID as being handled and reports whether this caller
+	// won the race. A second call for the same eventID returns false. It must
+	// be called inside the same transaction as the work it guards.
+	Claim(ctx context.Context, eventID string, orderID shared.ID, now time.Time) (claimed bool, err error)
+}
+
 // EntitlementRepo stores the fact that a user may open a material. Granting
 // idempotency lives in the domain (access.GrantEntitlement), not here.
 type EntitlementRepo interface {

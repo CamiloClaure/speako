@@ -29,14 +29,25 @@ const WithdrawalWindow = 7 * 24 * time.Hour
 
 // Order is the purchase aggregate. PaidAt records when the payment cleared;
 // the withdrawal window counts from it.
+//
+// ProviderRef is the gateway's own identifier for this checkout. The domain
+// never interprets it - it is carried so that reconciliation can ask the
+// gateway about an order that never produced a webhook.
 type Order struct {
-	ID        shared.ID
-	UserID    shared.ID
-	ProductID shared.ID
-	Amount    shared.Money
-	Status    Status
-	CreatedAt time.Time
-	PaidAt    time.Time
+	ID          shared.ID
+	UserID      shared.ID
+	ProductID   shared.ID
+	Amount      shared.Money
+	Status      Status
+	CreatedAt   time.Time
+	PaidAt      time.Time
+	ProviderRef string
+}
+
+// WithProviderRef returns the order tagged with the gateway's reference.
+func (o Order) WithProviderRef(ref string) Order {
+	o.ProviderRef = ref
+	return o
 }
 
 // NewOrder starts an order in the pending state.

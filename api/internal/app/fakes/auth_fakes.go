@@ -134,3 +134,30 @@ func (r *LoginTokenRepo) DeleteExpired(ctx context.Context, before time.Time) er
 	}
 	return nil
 }
+
+// PaymentEventRepo is an in-memory PaymentEventRepo. Claim is a real claim:
+// only the first caller for an eventID gets true, which is what a test needs
+// to prove a redelivered webhook grants nothing twice.
+type PaymentEventRepo struct {
+	mu       sync.Mutex
+	claimed  map[string]shared.ID
+	Err      error
+	Attempts int
+}
+
+func (r *PaymentEventRepo) Claim(ctx context.Context, eventID string, orderID shared.ID, now time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Err != nil {
+		return false, r.Err
+	}
+	if r.claimed == nil {
+		r.claimed = map[string]shared.ID{}
+	}
+	r.Attempts++
+	if _, seen := r.claimed[eventID]; seen {
+		return false, nil
+	}
+	r.claimed[eventID] = orderID
+	return true, nil
+}
