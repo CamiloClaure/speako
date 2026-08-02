@@ -1,0 +1,23 @@
+# build output
+/bin/
+/web/dist/
+/web/node_modules/
+/web/.vite/
+/web/test-results/
+/web/playwright-report/
+
+# local database
+*.db
+*.db-wal
+*.db-shm
+
+# secrets and local config
+.env
+.env.local
+/deploy/*.env
+
+# editors / os
+.DS_Store
+*.swp
+.idea/
+.vscode/

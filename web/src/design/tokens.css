@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/* Speako design tokens - "bold & playful" ed-tech.
+   Session B1 expands this via /ui-ux-pro-max; the values below are the locked
+   brand decisions, not placeholders.
+
+   Contrast trap: amber on white is ~2:1. NEVER use --color-accent-* for body
+   text or small labels - only as a fill behind --color-ink, or display type
+   at 24px and above. Violet 600 with white text passes AA. */
+
+@theme {
+  /* brand - violet */
+  --color-brand-50: #f5f3ff;
+  --color-brand-100: #ede9fe;
+  --color-brand-200: #ddd6fe;
+  --color-brand-300: #c4b5fd;
+  --color-brand-400: #a78bfa;
+  --color-brand-500: #8b5cf6;
+  --color-brand-600: #7c3aed;
+  --color-brand-700: #6d28d9;
+  --color-brand-800: #5b21b6;
+  --color-brand-900: #4c1d95;
+
+  /* accent - amber (fills and highlights only) */
+  --color-accent-50: #fffbeb;
+  --color-accent-100: #fef3c7;
+  --color-accent-200: #fde68a;
+  --color-accent-300: #fcd34d;
+  --color-accent-400: #fbbf24;
+  --color-accent-500: #f59e0b;
+  --color-accent-600: #d97706;
+
+  /* neutrals - contrast on white measured, not guessed
+     ink 17.75:1 · muted 7.69:1 · subtle 4.97:1 · hint 2.58:1 (decorative only) */
+  --color-ink: #101828;
+  --color-muted: #475467;
+  --color-subtle: #667085;
+  --color-hint: #98a2b3;
+  --color-line: #eaecf0;
+  --color-surface: #f9fafb;
+  --color-canvas: #ffffff;
+
+  /* semantic - two tokens each, because the bright version fails as text.
+     *-fill  = backgrounds, icons, bars (never text on white)
+     *-text  = the AA-passing version for words (all ≥ 4.8:1 on white) */
+  --color-success-fill: #12b76a;
+  --color-success-text: #067647;
+  --color-warning-fill: #f79009;
+  --color-warning-text: #b54708;
+  --color-danger-fill: #f04438;
+  --color-danger-text: #b42318;
+  --color-info-fill: #2e90fa;
+  --color-info-text: #175cd3;
+
+  /* type */
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Poppins", "Plus Jakarta Sans Variable", ui-sans-serif, sans-serif;
+
+  /* shape - chunky and rounded is the whole personality */
+  --radius-sm: 0.75rem; /* 12px */
+  --radius-md: 1rem; /* 16px */
+  --radius-lg: 1.25rem; /* 20px */
+  --radius-xl: 1.75rem; /* 28px */
+
+  /* chunky shadows: a hard offset, not a blur cloud */
+  --shadow-chunk: 0 4px 0 0 rgb(16 24 40 / 0.08);
+  --shadow-chunk-brand: 0 4px 0 0 var(--color-brand-800);
+  --shadow-lift: 0 12px 24px -8px rgb(16 24 40 / 0.16);
+
+  /* motion */
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  /* Every interactive element must show where focus is. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
