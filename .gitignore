@@ -21,3 +21,6 @@
 *.swp
 .idea/
 .vscode/
+
+# typescript incremental build info
+web/tsconfig.tsbuildinfo
