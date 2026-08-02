@@ -10,6 +10,11 @@ import (
 // notice window.
 var ErrTooLateToBook = shared.NewDomainError("booking.too_late", "too late to book this slot")
 
+// ErrSlotTaken reports that someone else booked the slot first. Storage
+// detects this, not the domain: only the database can settle a race between
+// two students confirming the same time.
+var ErrSlotTaken = shared.NewDomainError("booking.slot_taken", "this slot has just been taken")
+
 // BookingStatus is the lifecycle of a lesson booking.
 type BookingStatus string
 

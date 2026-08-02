@@ -42,13 +42,16 @@ func newAuthHarness(t *testing.T) authHarness {
 	return h
 }
 
-func TestRequestMagicLinkUnknownEmailSendsNoMailAndNoError(t *testing.T) {
+// Sign-up IS the magic link: a first-time address must receive one, or the
+// platform can never acquire a customer. Anti-enumeration comes from the
+// response being identical, not from refusing to send.
+func TestRequestMagicLinkUnknownEmailStillSendsSoSignUpWorks(t *testing.T) {
 	h := newAuthHarness(t)
 	if err := h.uc.RequestMagicLink(context.Background(), "nobody@example.com"); err != nil {
-		t.Fatalf("RequestMagicLink must return nil for an unknown email, got %v", err)
+		t.Fatalf("RequestMagicLink: %v", err)
 	}
-	if len(h.mailer.MagicLinkCalls) != 0 {
-		t.Fatalf("sent %d mails to an unknown account, want 0", len(h.mailer.MagicLinkCalls))
+	if len(h.mailer.MagicLinkCalls) != 1 {
+		t.Fatalf("sent %d mails to a new address, want 1 - nobody could sign up", len(h.mailer.MagicLinkCalls))
 	}
 	if err := h.uc.RequestMagicLink(context.Background(), "not-an-email"); err == nil {
 		t.Fatal("RequestMagicLink must reject an invalid email")
@@ -210,21 +213,6 @@ func TestSignOutInvalidatesSession(t *testing.T) {
 // "Unknown address" and "the database is down" must not look the same. The
 // first is a silent nil to avoid leaking which accounts exist; the second has
 // to surface, or a student gets a success screen and no email, forever.
-func TestRequestMagicLinkSurfacesStorageFailure(t *testing.T) {
-	h := newAuthHarness(t)
-	h.users.Err = errors.New("database is down")
-
-	err := h.uc.RequestMagicLink(context.Background(), "ana@test.com")
-	if err == nil {
-		t.Fatal("a storage failure returned nil - the caller would report success and send nothing")
-	}
-	if len(h.mailer.MagicLinkCalls) != 0 {
-		t.Fatalf("sent %d mails despite the failure, want 0", len(h.mailer.MagicLinkCalls))
-	}
-}
-
-// A read failure must never be mistaken for "no such account", which would
-// create a duplicate user and sign them into an empty one.
 func TestSignInWithGoogleDoesNotCreateUserOnStorageFailure(t *testing.T) {
 	h := newAuthHarness(t)
 	h.users.Err = errors.New("database is down")

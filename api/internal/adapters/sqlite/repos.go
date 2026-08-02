@@ -59,6 +59,14 @@ func mapErr(what string, err error) error {
 
 func fromUnix(v int64) time.Time { return time.Unix(v, 0).UTC() }
 
+// unixOrZero renders a time for a NOT NULL column, mapping "no expiry" to 0.
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
+}
+
 // optUnix stores a time as unix seconds, or NULL for the zero time.
 func optUnix(t time.Time) any {
 	if t.IsZero() {
@@ -514,7 +522,10 @@ var _ ports.CreditLedgerRepo = (*CreditLedgerRepo)(nil)
 func (r *CreditLedgerRepo) Append(ctx context.Context, userID shared.ID, e credit.Entry) error {
 	_, err := r.q(ctx).ExecContext(ctx,
 		`INSERT INTO credit_entries (user_id, delta, reason, ref_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		string(userID), e.Delta, e.Reason, e.RefID, optUnix(e.ExpiresAt), time.Now().Unix())
+		// A refund or a pack with no validity has no expiry. The column is NOT
+		// NULL, so a never-expiring credit is written as 0 and read back as the
+		// zero time - passing NULL here crashed every refund.
+		string(userID), e.Delta, e.Reason, e.RefID, unixOrZero(e.ExpiresAt), time.Now().Unix())
 	return err
 }
 
@@ -567,6 +578,12 @@ func (r *BookingRepo) Create(ctx context.Context, b scheduling.Booking) error {
 	_, err := r.q(ctx).ExecContext(ctx,
 		`INSERT INTO bookings (id, student_id, teacher_id, starts_at, ends_at, status) VALUES (?, ?, ?, ?, ?, ?)`,
 		string(b.ID), string(b.StudentID), string(r.teacherID), b.Slot.Start.Unix(), b.Slot.End.Unix(), string(b.Status))
+	if isUniqueViolation(err) {
+		// The partial unique index just settled a race between two students.
+		// Surfacing the raw constraint error would be a 500 for what is an
+		// ordinary, expected outcome.
+		return scheduling.ErrSlotTaken
+	}
 	return err
 }
 

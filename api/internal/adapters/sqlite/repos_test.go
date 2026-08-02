@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/camiloclaure/speako/api/internal/domain/credit"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ type sqliteStore struct {
 	payments     *PaymentEventRepo
 	bookings     *BookingRepo
 	entitlements *EntitlementRepo
+	ledger       *CreditLedgerRepo
 }
 
 func newTestStore(t *testing.T) *sqliteStore {
@@ -49,6 +51,7 @@ func newTestStore(t *testing.T) *sqliteStore {
 		payments:     NewPaymentEventRepo(db),
 		bookings:     NewBookingRepo(db, teacherID),
 		entitlements: NewEntitlementRepo(db),
+		ledger:       NewCreditLedgerRepo(db),
 	}
 }
 
@@ -197,5 +200,60 @@ func TestInTxCommits(t *testing.T) {
 	}
 	if _, err := s.users.GetByID(context.Background(), shared.ID("u-committed")); err != nil {
 		t.Fatalf("committed user should be visible: %v", err)
+	}
+}
+
+// A refund, and a pack sold with no validity period, carry no expiry. The
+// column is NOT NULL, so writing one as NULL crashed every refund with a 500.
+func TestCreditEntryWithoutExpiryRoundTrips(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, shared.ID("student-1"), "s1@example.com")
+
+	if err := s.ledger.Append(ctx, shared.ID("student-1"), credit.Entry{
+		Delta: 1, Reason: "booking_refund", RefID: "b1",
+	}); err != nil {
+		t.Fatalf("appending a never-expiring credit: %v", err)
+	}
+
+	ledger, err := s.ledger.Get(ctx, shared.ID("student-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := ledger.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if !entries[0].ExpiresAt.IsZero() {
+		t.Errorf("ExpiresAt = %v, want the zero time (never expires)", entries[0].ExpiresAt)
+	}
+	if got := ledger.Balance(time.Now().AddDate(10, 0, 0)); got != 1 {
+		t.Errorf("balance in ten years = %d, want 1 - a never-expiring credit must not lapse", got)
+	}
+}
+
+// A slot race is an ordinary outcome, not a server fault: the second student
+// must get a domain error the transport can turn into 409, not a raw
+// constraint violation that becomes a 500.
+func TestCreateBookingOnTakenSlotReturnsDomainError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, shared.ID("student-1"), "s1@example.com")
+	seedUser(t, s, shared.ID("student-2"), "s2@example.com")
+	seedUser(t, s, teacherID, "teacher@example.com")
+
+	start := time.Now().Add(48 * time.Hour).Truncate(time.Hour)
+	slot := shared.TimeSlot{Start: start, End: start.Add(time.Hour)}
+
+	if err := s.bookings.Create(ctx, scheduling.Booking{
+		ID: "b1", StudentID: "student-1", Slot: slot, Status: scheduling.StatusScheduled,
+	}); err != nil {
+		t.Fatalf("first booking: %v", err)
+	}
+	err := s.bookings.Create(ctx, scheduling.Booking{
+		ID: "b2", StudentID: "student-2", Slot: slot, Status: scheduling.StatusScheduled,
+	})
+	if !errors.Is(err, scheduling.ErrSlotTaken) {
+		t.Fatalf("err = %v, want scheduling.ErrSlotTaken", err)
 	}
 }

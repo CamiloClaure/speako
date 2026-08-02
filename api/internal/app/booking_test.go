@@ -12,7 +12,11 @@ import (
 	"github.com/camiloclaure/speako/api/internal/domain/shared"
 )
 
-var monday17 = time.Date(2026, time.January, 5, 17, 0, 0, 0, time.UTC)
+// The availability rule below means 17:00 in the teacher's timezone. São Paulo
+// is UTC-3 year round (Brazil dropped DST in 2019), so the instant that slot
+// actually starts at is 20:00 UTC. Writing 17:00 UTC here is the same mistake
+// that made every real booking fail.
+var monday17 = time.Date(2026, time.January, 5, 20, 0, 0, 0, time.UTC)
 
 type bookingHarness struct {
 	uc           *Booking
@@ -63,7 +67,7 @@ func TestListAvailableSlots(t *testing.T) {
 	from := time.Date(2026, time.January, 5, 0, 0, 0, 0, time.UTC)
 	to := from.Add(24 * time.Hour)
 
-	slots, err := h.uc.ListAvailableSlots(ctx, from, to, "UTC")
+	slots, err := h.uc.ListAvailableSlots(ctx, from, to)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +90,7 @@ func TestListAvailableSlotsExcludesBooked(t *testing.T) {
 	}
 	from := time.Date(2026, time.January, 5, 0, 0, 0, 0, time.UTC)
 
-	slots, err := h.uc.ListAvailableSlots(ctx, from, from.Add(24*time.Hour), "UTC")
+	slots, err := h.uc.ListAvailableSlots(ctx, from, from.Add(24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,5 +293,42 @@ func TestListMyBookings(t *testing.T) {
 	}
 	if len(bookings) != 1 || bookings[0].ID != bookingID {
 		t.Fatalf("got %+v, want [%v]", bookings, bookingID)
+	}
+}
+
+// Availability is authored in the teacher's local time; a slot start is a UTC
+// instant. Matching them by raw clock fields rejected every slot the calendar
+// offered, so booking was impossible. This pins the two together.
+func TestBookLessonAcceptsASlotTheCalendarOffered(t *testing.T) {
+	h := newBookingHarness(t)
+	ctx := context.Background()
+
+	// 09:00-12:00 São Paulo on weekdays, 60-minute lessons.
+	rules := []scheduling.AvailabilityRule{}
+	for _, wd := range []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday} {
+		r, err := scheduling.NewAvailabilityRule(wd, 9*60, 12*60, 60)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, r)
+	}
+	if err := h.availability.SaveRules(ctx, rules); err != nil {
+		t.Fatal(err)
+	}
+
+	from := h.clock.NowTime.Add(48 * time.Hour).Truncate(24 * time.Hour)
+	offered, err := h.uc.ListAvailableSlots(ctx, from, from.Add(72*time.Hour))
+	if err != nil {
+		t.Fatalf("ListAvailableSlots: %v", err)
+	}
+	if len(offered) == 0 {
+		t.Fatal("the calendar offered no slots to book")
+	}
+
+	if err := h.ledger.Append(ctx, shared.ID("student-1"), credit.Entry{Delta: 1, Reason: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.uc.BookLesson(ctx, shared.ID("student-1"), offered[0].Start); err != nil {
+		t.Fatalf("booking a slot the calendar offered failed: %v", err)
 	}
 }

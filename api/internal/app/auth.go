@@ -61,19 +61,17 @@ func NewAuth(
 	}
 }
 
-// RequestMagicLink emails a single-use login link to a registered address.
-// Unknown addresses get a silent nil so a caller can never tell whether an
-// account exists; that is the anti-enumeration contract.
+// RequestMagicLink emails a single-use login link. It deliberately does not
+// care whether the address already has an account: redeeming the link creates
+// one, which is how sign-up works on a passwordless platform.
+//
+// Anti-enumeration comes from the response being identical either way, not
+// from refusing to send - only the real inbox owner ever sees the token.
+// Rate limiting, not silence, is what keeps this from becoming a mail cannon.
 func (uc *Auth) RequestMagicLink(ctx context.Context, rawEmail string) error {
 	email, err := shared.ParseEmail(rawEmail)
 	if err != nil {
 		return err
-	}
-	if _, err := uc.users.GetByEmail(ctx, email); err != nil {
-		if errors.Is(err, ports.ErrNotFound) {
-			return nil // unknown address: stay silent, never leak existence
-		}
-		return err // a storage failure must not look like a successful request
 	}
 	raw, hash, err := uc.tokengen.NewToken()
 	if err != nil {

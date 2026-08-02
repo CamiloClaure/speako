@@ -27,11 +27,28 @@ type BookingPolicy struct {
 	FreeCancel time.Duration
 	// MeetingURL is the external video room attached to every booking.
 	MeetingURL string
+	// Timezone is the IANA zone the teacher authors availability in. Slots are
+	// generated in it and stored as UTC.
+	Timezone string
+}
+
+// Location resolves the teacher's timezone, falling back to São Paulo rather
+// than to UTC: a silent UTC fallback would shift every lesson by three hours.
+func (p BookingPolicy) Location() *time.Location {
+	name := p.Timezone
+	if name == "" {
+		name = "America/Sao_Paulo"
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		loc, _ = time.LoadLocation("America/Sao_Paulo")
+	}
+	return loc
 }
 
 // DefaultBookingPolicy matches the documented defaults in .env.example.
 func DefaultBookingPolicy() BookingPolicy {
-	return BookingPolicy{MinNotice: 12 * time.Hour, FreeCancel: 24 * time.Hour}
+	return BookingPolicy{MinNotice: 12 * time.Hour, FreeCancel: 24 * time.Hour, Timezone: "America/Sao_Paulo"}
 }
 
 // Booking runs the scheduling lifecycle: showing what is free, atomically
@@ -70,11 +87,16 @@ func NewBooking(
 // ListAvailableSlots returns every slot in [from, to) that the availability
 // rules and exceptions open and existing bookings do not already occupy,
 // converted to the requester's timezone for slot generation.
-func (uc *Booking) ListAvailableSlots(ctx context.Context, from, to time.Time, tz string) ([]shared.TimeSlot, error) {
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		return nil, err
-	}
+// ListAvailableSlots returns the free slots between from and to as UTC
+// instants.
+//
+// Generation always uses the TEACHER's timezone, because that is the zone the
+// availability rules were written in. Interpreting them in the viewer's zone
+// would offer a student in Tokyo a different set of real instants than a
+// student in São Paulo, for the same teacher. Rendering those instants in the
+// student's local time is the frontend's job.
+func (uc *Booking) ListAvailableSlots(ctx context.Context, from, to time.Time) ([]shared.TimeSlot, error) {
+	loc := uc.policy.Location()
 	rules, err := uc.availability.ListRules(ctx)
 	if err != nil {
 		return nil, err
@@ -166,20 +188,66 @@ func (uc *Booking) ListMyBookings(ctx context.Context, userID shared.ID) ([]sche
 // ponytail: weekday and window are evaluated in UTC; the slot is only as real
 // as the rule list that produced it. A later session that resolves the
 // teacher's timezone replaces time.UTC with the teacher's location.
+// slotFor resolves the slot that starts at slotStart, by asking the very same
+// generator the student's calendar was built from.
+//
+// It must not re-derive the match: availability rules are authored in the
+// teacher's local time while slotStart is a UTC instant, so comparing raw
+// clock fields rejected every real slot. One generator, one answer.
 func (uc *Booking) slotFor(ctx context.Context, slotStart time.Time) (shared.TimeSlot, error) {
 	rules, err := uc.availability.ListRules(ctx)
 	if err != nil {
 		return shared.TimeSlot{}, err
 	}
-	for _, r := range rules {
-		if r.Weekday != slotStart.Weekday() {
-			continue
+	exceptions, err := uc.availability.ListExceptions(ctx)
+	if err != nil {
+		return shared.TimeSlot{}, err
+	}
+	day := slotStart.UTC().Truncate(24 * time.Hour)
+	candidates := scheduling.GenerateSlots(rules, exceptions, nil,
+		day.Add(-24*time.Hour), day.Add(48*time.Hour), uc.policy.Location())
+	for _, c := range candidates {
+		if c.Start.Equal(slotStart) {
+			return c, nil
 		}
-		mins := slotStart.Hour()*60 + slotStart.Minute()
-		if mins < r.StartMin || mins+r.SlotMin > r.EndMin {
-			continue
-		}
-		return shared.NewTimeSlot(slotStart, slotStart.Add(time.Duration(r.SlotMin)*time.Minute))
 	}
 	return shared.TimeSlot{}, ErrSlotUnavailable
+}
+
+// CreditBalance is what a student sees on their dashboard: how many lessons
+// they can still book, and which credits are about to lapse.
+type CreditBalance struct {
+	Balance      int
+	NextExpiry   time.Time
+	ExpiringSoon int
+}
+
+// expiringSoonWindow is how far ahead a student is warned about credits they
+// are about to lose.
+const expiringSoonWindow = 14 * 24 * time.Hour
+
+// GetBalance reports the spendable credit balance and warns about credits
+// lapsing within the next two weeks, so a pack does not quietly expire unused.
+func (uc *Booking) GetBalance(ctx context.Context, userID shared.ID) (CreditBalance, error) {
+	ledger, err := uc.ledger.Get(ctx, userID)
+	if err != nil {
+		return CreditBalance{}, err
+	}
+	now := uc.clock.Now()
+	out := CreditBalance{Balance: ledger.Balance(now)}
+	for _, e := range ledger.Entries() {
+		if e.Delta <= 0 || e.ExpiresAt.IsZero() || !e.ExpiresAt.After(now) {
+			continue
+		}
+		if out.NextExpiry.IsZero() || e.ExpiresAt.Before(out.NextExpiry) {
+			out.NextExpiry = e.ExpiresAt
+		}
+		if e.ExpiresAt.Before(now.Add(expiringSoonWindow)) {
+			out.ExpiringSoon += e.Delta
+		}
+	}
+	if out.ExpiringSoon > out.Balance {
+		out.ExpiringSoon = out.Balance
+	}
+	return out, nil
 }
