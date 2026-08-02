@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -20,8 +19,9 @@ import (
 	"github.com/camiloclaure/speako/api/internal/domain/shared"
 )
 
-// ErrNotFound is returned by a fake Get when the key is absent.
-var ErrNotFound = errors.New("fakes: not found")
+// ErrNotFound is returned by a fake Get when the key is absent. It wraps the
+// port sentinel so use cases can tell "absent" from "storage broke".
+var ErrNotFound = fmt.Errorf("fakes: %w", ports.ErrNotFound)
 
 // UserRepo is an in-memory UserRepo. Set Err to force every method to fail.
 type UserRepo struct {
@@ -757,6 +757,13 @@ type TokenGen struct {
 	mu  sync.Mutex
 	seq int
 	Err error
+}
+
+// Hash is the single hashing implementation the fake exposes; auth uses it
+// rather than re-deriving the hash, so the two can never drift.
+func (g *TokenGen) Hash(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 func (g *TokenGen) NewToken() (string, string, error) {

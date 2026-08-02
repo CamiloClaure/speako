@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/camiloclaure/speako/api/internal/domain/access"
@@ -20,6 +21,12 @@ type UserRepo interface {
 	GetByID(ctx context.Context, id shared.ID) (identity.User, error)
 	GetByEmail(ctx context.Context, email shared.EmailAddress) (identity.User, error)
 }
+
+// ErrNotFound is what every repository returns when a record is absent, and
+// only then. It has to be distinguishable from a real storage failure: code
+// that treats "the database is down" as "no such account" silently swallows
+// outages and, worse, goes on to create duplicate records.
+var ErrNotFound = errors.New("not found")
 
 // SessionRepo stores live sessions. Session.Token holds the hash of the cookie
 // value, never the raw token, so a database leak cannot be replayed as a login.
@@ -167,8 +174,13 @@ type IDGen interface {
 
 // TokenGen produces a raw secret token and its hash. Only the hash is stored;
 // the raw value travels in the magic link and is never persisted.
+//
+// Hash exists so there is exactly one hashing implementation. When a caller
+// re-derives the hash itself to look a token up, the two implementations can
+// drift and every login silently stops matching.
 type TokenGen interface {
 	NewToken() (raw string, hash string, err error)
+	Hash(raw string) string
 }
 
 // TxManager runs a function inside a database transaction; the returned error
