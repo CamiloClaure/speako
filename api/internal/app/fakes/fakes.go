@@ -249,6 +249,19 @@ func (r *OrderRepo) ListPendingBefore(ctx context.Context, before time.Time) ([]
 	return out, nil
 }
 
+func (r *OrderRepo) ListAll(ctx context.Context) ([]ordering.Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Err != nil {
+		return nil, r.Err
+	}
+	out := make([]ordering.Order, 0, len(r.order))
+	for _, id := range r.order {
+		out = append(out, r.byID[id])
+	}
+	return out, nil
+}
+
 // EntitlementRepo is an in-memory EntitlementRepo. Set Err to force every
 // method to fail.
 type EntitlementRepo struct {

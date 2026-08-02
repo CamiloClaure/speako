@@ -202,3 +202,21 @@ func (r *Router) requireUser(next func(http.ResponseWriter, *http.Request, ident
 		next(w, req, user)
 	}
 }
+
+// requireTeacher gates the admin surface. This is the real check - the SPA's
+// route guard only avoids rendering a screen the API would refuse anyway, and
+// a student who types /admin must be turned away here, not there.
+func (r *Router) requireTeacher(next func(http.ResponseWriter, *http.Request, identity.User)) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		user, ok := userFrom(req.Context())
+		if !ok {
+			writeError(w, errUnauthenticated)
+			return
+		}
+		if !user.Role.IsTeacher() && !user.Role.IsAdmin() {
+			writeError(w, errForbidden)
+			return
+		}
+		next(w, req, user)
+	}
+}

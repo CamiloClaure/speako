@@ -92,8 +92,9 @@ func run(ctx context.Context) error {
 	materials := app.NewMaterials(products, entitlements, files)
 	catalog := app.NewCatalog(products)
 	leads := app.NewLeads(leadRepo, mailer, clock, tokengen, cfg.PublicURL+"/confirmar?token=")
+	teacher := app.NewTeacher(products, orders, bookings, availability, ledger, users, tx, clock, idgen)
 
-	handler := speakohttp.NewRouter(auth, purchase, booking, materials, catalog, leads, speakohttp.Config{
+	handler := speakohttp.NewRouter(auth, purchase, booking, materials, catalog, leads, teacher, speakohttp.Config{
 		PublicURL:    cfg.PublicURL,
 		CookieSecure: cfg.CookieSecure,
 		SessionTTL:   cfg.SessionTTL,

@@ -70,6 +70,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusUnauthorized, codeUnauthenticated, "authentication required"
 	case errors.Is(err, app.ErrSessionExpired), errors.Is(err, identity.ErrInvalidToken):
 		status, code, message = http.StatusUnauthorized, codeUnauthenticated, err.Error()
+	case errors.Is(err, errForbidden):
+		status, code, message = http.StatusForbidden, codeForbidden, err.Error()
 	case errors.Is(err, app.ErrNoEntitlement):
 		status, code, message = http.StatusForbidden, codeForbidden, err.Error()
 	case errors.Is(err, ports.ErrNotFound):

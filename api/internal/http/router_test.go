@@ -54,13 +54,15 @@ func newTestRig(t *testing.T) *testRig {
 	)
 	materials := app.NewMaterials(&fakes.ProductRepo{}, &fakes.EntitlementRepo{}, &fakes.FileStorage{})
 	leads := app.NewLeads(&fakes.LeadRepo{}, mailer, clock, tokengen, "https://app.speako.test/leads/confirm?token=")
+	teacher := app.NewTeacher(&fakes.ProductRepo{}, &fakes.OrderRepo{}, &fakes.BookingRepo{},
+		availability, &fakes.CreditLedgerRepo{}, users, tx, clock, idgen)
 
 	config := apihttp.Config{
 		PublicURL:    "https://app.speako.test",
 		CookieSecure: false,
 		SessionTTL:   30 * 24 * time.Hour,
 	}
-	mux := apihttp.NewRouter(auth, purchase, booking, materials, catalog, leads, config)
+	mux := apihttp.NewRouter(auth, purchase, booking, materials, catalog, leads, teacher, config)
 	return &testRig{mux: mux, mailer: mailer, users: users, availability: availability}
 }
 
@@ -186,5 +188,42 @@ func TestCheckoutUnknownProductReturnsNotFound(t *testing.T) {
 	}
 	if envelope.Error.Code != "not_found" {
 		t.Errorf("code = %q, want %q", envelope.Error.Code, "not_found")
+	}
+}
+
+// A signed-in student reaching for the admin surface must be refused by the
+// API, not merely by the SPA's router. The client-side guard is convenience.
+func TestAdminRoutesRejectAStudent(t *testing.T) {
+	rig := newTestRig(t)
+	cookie := signIn(t, rig)
+
+	for _, path := range []string{
+		"/api/v1/admin/availability",
+		"/api/v1/admin/bookings",
+		"/api/v1/admin/orders",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(cookie)
+		rr := httptest.NewRecorder()
+		rig.mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("%s: status = %d, want 403; body=%s", path, rr.Code, rr.Body.String())
+		}
+		var envelope dto.ErrorEnvelope
+		if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err == nil && envelope.Error.Code != "forbidden" {
+			t.Errorf("%s: code = %q, want forbidden", path, envelope.Error.Code)
+		}
+	}
+}
+
+// And an anonymous caller gets 401, not 403 - the two are different answers.
+func TestAdminRoutesRejectAnonymous(t *testing.T) {
+	rig := newTestRig(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders", nil)
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
 	}
 }

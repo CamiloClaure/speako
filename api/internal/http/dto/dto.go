@@ -138,3 +138,44 @@ type MercadoPagoWebhook struct {
 		ID string `json:"id"`
 	} `json:"data"`
 }
+
+// AvailabilityRule is one weekly window in the teacher's own timezone.
+// Minutes since local midnight, not clock strings, so the client cannot smuggle
+// a timezone in.
+type AvailabilityRule struct {
+	Weekday  int `json:"weekday"`
+	StartMin int `json:"start_min"`
+	EndMin   int `json:"end_min"`
+	SlotMin  int `json:"slot_min"`
+}
+
+// Availability is the teacher's whole weekly schedule.
+type Availability struct {
+	Rules []AvailabilityRule `json:"rules"`
+}
+
+// AdminBooking is a booking as the teacher sees it.
+type AdminBooking struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Start  string `json:"start"`
+	End    string `json:"end"`
+}
+
+type AdminBookingList struct {
+	Bookings []AdminBooking `json:"bookings"`
+}
+
+// AdminProductInput creates or updates a product. The price arrives as integer
+// cents; converting from reais is the client's job and is tested there.
+type AdminProductInput struct {
+	ID           string `json:"id"`
+	Slug         string `json:"slug"`
+	Title        string `json:"title"`
+	PriceCents   int64  `json:"price_cents"`
+	Kind         string `json:"kind"`
+	FileKey      string `json:"file_key"`
+	Credits      int    `json:"credits"`
+	ValidityDays int    `json:"validity_days"`
+	Active       bool   `json:"active"`
+}

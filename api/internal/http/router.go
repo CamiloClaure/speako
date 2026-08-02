@@ -17,6 +17,10 @@ import (
 // and maps to 401 unauthenticated in errors.go.
 var errUnauthenticated = errors.New("authentication required")
 
+// errForbidden is a signed-in user reaching for something that is not theirs -
+// distinct from errUnauthenticated, which means nobody is signed in at all.
+var errForbidden = errors.New("esta área é restrita à professora")
+
 // errNotImplemented marks an endpoint the contract declares but the app layer
 // cannot serve yet.
 var errNotImplemented = errors.New("not implemented")
@@ -39,6 +43,7 @@ type Router struct {
 	materials *app.Materials
 	catalog   *app.Catalog
 	leads     *app.Leads
+	teacher   *app.Teacher
 	config    Config
 }
 
@@ -51,6 +56,7 @@ func NewRouter(
 	materials *app.Materials,
 	catalog *app.Catalog,
 	leads *app.Leads,
+	teacher *app.Teacher,
 	config Config,
 ) *http.ServeMux {
 	r := &Router{
@@ -60,6 +66,7 @@ func NewRouter(
 		materials: materials,
 		catalog:   catalog,
 		leads:     leads,
+		teacher:   teacher,
 		config:    config,
 	}
 	routes := http.NewServeMux()
@@ -95,6 +102,15 @@ func (r *Router) register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/bookings/{id}", r.requireUser(r.handleCancelBooking))
 
 	mux.HandleFunc("POST /api/v1/webhooks/mercadopago", r.handleMercadoPagoWebhook)
+
+	// Teacher-only. requireTeacher, not requireUser.
+	mux.HandleFunc("GET /api/v1/admin/availability", r.requireTeacher(r.handleAdminGetAvailability))
+	mux.HandleFunc("PUT /api/v1/admin/availability", r.requireTeacher(r.handleAdminPutAvailability))
+	mux.HandleFunc("GET /api/v1/admin/bookings", r.requireTeacher(r.handleAdminBookings))
+	mux.HandleFunc("POST /api/v1/admin/bookings/{id}/status", r.requireTeacher(r.handleAdminBookingStatus))
+	mux.HandleFunc("DELETE /api/v1/admin/bookings/{id}", r.requireTeacher(r.handleAdminCancelBooking))
+	mux.HandleFunc("GET /api/v1/admin/orders", r.requireTeacher(r.handleAdminOrders))
+	mux.HandleFunc("POST /api/v1/admin/products", r.requireTeacher(r.handleAdminCreateProduct))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

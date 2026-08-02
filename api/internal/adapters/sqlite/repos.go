@@ -391,6 +391,12 @@ func (r *OrderRepo) ListPendingBefore(ctx context.Context, before time.Time) ([]
 		before.Unix())
 }
 
+func (r *OrderRepo) ListAll(ctx context.Context) ([]ordering.Order, error) {
+	return r.listOrders(ctx,
+		`SELECT id, user_id, product_id, status, amount_cents, provider_ref, created_at, paid_at FROM orders ORDER BY created_at, rowid`,
+		nil)
+}
+
 func (r *OrderRepo) listOrders(ctx context.Context, query string, arg any) ([]ordering.Order, error) {
 	rows, err := r.q(ctx).QueryContext(ctx, query, arg)
 	if err != nil {

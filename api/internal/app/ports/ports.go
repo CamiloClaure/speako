@@ -70,6 +70,7 @@ type OrderRepo interface {
 	GetByID(ctx context.Context, id shared.ID) (ordering.Order, error)
 	ListByUserID(ctx context.Context, userID shared.ID) ([]ordering.Order, error)
 	ListPendingBefore(ctx context.Context, before time.Time) ([]ordering.Order, error)
+	ListAll(ctx context.Context) ([]ordering.Order, error)
 }
 
 // PaymentEventRepo records which gateway events have already been applied.

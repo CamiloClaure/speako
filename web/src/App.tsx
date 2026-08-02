@@ -11,6 +11,7 @@ import { Materiais } from "./routes/app/Materiais";
 import { Compras } from "./routes/app/Compras";
 import { Termos, Privacidade } from "./routes/public/Legal";
 import { CheckoutSucesso, CheckoutPendente, CheckoutErro } from "./routes/checkout/Checkout";
+import { AdminAgenda, AdminAulas, AdminProdutos, AdminVendas } from "./routes/admin/Admin";
 import { Button, Skeleton } from "./design/primitives";
 
 export function App() {
@@ -32,6 +33,10 @@ export function App() {
               <Route path="/checkout/sucesso" element={<CheckoutSucesso />} />
               <Route path="/checkout/pendente" element={<CheckoutPendente />} />
               <Route path="/checkout/erro" element={<CheckoutErro />} />
+              <Route path="/admin/agenda" element={<TeacherOnly><AdminAgenda /></TeacherOnly>} />
+              <Route path="/admin/aulas" element={<TeacherOnly><AdminAulas /></TeacherOnly>} />
+              <Route path="/admin/produtos" element={<TeacherOnly><AdminProdutos /></TeacherOnly>} />
+              <Route path="/admin/vendas" element={<TeacherOnly><AdminVendas /></TeacherOnly>} />
               <Route path="/termos" element={<Termos />} />
               <Route path="/privacidade" element={<Privacidade />} />
               <Route path="*" element={<NotFound />} />
@@ -67,6 +72,43 @@ function Protected({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Teacher-only routes. Like Protected, this is convenience only - the API
+ * refuses /api/v1/admin/* for a student regardless of what renders here.
+ */
+function TeacherOnly({ children }: { children: ReactNode }) {
+  const { user, loading } = useSession();
+  if (loading) {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 py-10">
+        <Skeleton className="h-10 w-56" />
+        <Skeleton className="h-32" />
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/entrar" replace />;
+  if (user.role !== "teacher" && user.role !== "admin") return <Navigate to="/painel" replace />;
+  return (
+    <div className="flex flex-col">
+      <nav className="border-b-2 border-line bg-surface">
+        <div className="mx-auto flex w-full max-w-5xl gap-1 overflow-x-auto px-5 py-2">
+          {([
+            ["/admin/agenda", "Agenda"],
+            ["/admin/aulas", "Aulas"],
+            ["/admin/produtos", "Produtos"],
+            ["/admin/vendas", "Vendas"],
+          ] as const).map(([to, label]) => (
+            <Link key={to} to={to} className="whitespace-nowrap rounded-md px-3 py-2 font-semibold text-muted hover:bg-canvas hover:text-ink">
+              {label}
+            </Link>
+          ))}
+        </div>
+      </nav>
+      {children}
+    </div>
+  );
+}
+
 function Header() {
   const { user, signOut } = useSession();
   return (
@@ -84,6 +126,11 @@ function Header() {
               <Link to="/painel/aulas" className="px-3 py-2 font-semibold text-muted hover:text-ink">
                 Aulas
               </Link>
+              {(user.role === "teacher" || user.role === "admin") && (
+                <Link to="/admin/agenda" className="px-3 py-2 font-semibold text-brand-700 hover:text-brand-800">
+                  Admin
+                </Link>
+              )}
               <Button size="sm" variant="ghost" onClick={() => void signOut()}>
                 Sair
               </Button>
