@@ -41,7 +41,18 @@ Work is cut into sessions in `docs/sessions/`. Each one declares the files it ow
 definition of done. Run one at a time:
 
 ```bash
-opencode run "$(cat docs/sessions/S1-domain.md)"
+opencode run --auto --model omniroute/auto/coding "$(cat docs/sessions/SN.md)"
+```
+
+`--auto` is required. Without it the run still reads files but every write hits a permission prompt that a
+non-interactive run cannot answer, so it exits 0 having changed nothing. Do not use `-c/--continue` to resume
+a finished run either - it returns immediately without doing work. Start each session fresh.
+
+A session can also run out of budget mid-brief (S1 stopped one test file short). Always re-check the
+definition of done yourself before merging:
+
+```bash
+cd api && gofmt -l . && go vet ./... && go test ./... && go test -run TestDependencyRule ./internal/arch/
 ```
 
 Order: `S0 → S1 → S2 → S3`, then the backend track (`S4…S8`) and frontend track (`B1…B5`) in parallel on
