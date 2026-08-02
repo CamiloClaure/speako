@@ -16,17 +16,21 @@ var (
 )
 
 // Lead is a captured prospect awaiting double opt-in confirmation.
+// ConfirmTokenHash is the hash of the token in the opt-in email. It lives on
+// the lead rather than in the login-token store on purpose: a marketing
+// confirmation must never be redeemable as a session.
 type Lead struct {
-	Email       shared.EmailAddress
-	Source      string
-	ConsentAt   time.Time
-	ConsentIP   string
-	ConfirmedAt time.Time
+	Email            shared.EmailAddress
+	Source           string
+	ConsentAt        time.Time
+	ConsentIP        string
+	ConfirmedAt      time.Time
+	ConfirmTokenHash string
 }
 
 // Capture records a lead with LGPD consent. The consent IP must be non-empty;
 // both it and the consent timestamp are evidence of a valid consent event.
-func Capture(email shared.EmailAddress, source string, consentAt time.Time, consentIP string) (Lead, error) {
+func Capture(email shared.EmailAddress, source string, consentAt time.Time, consentIP, confirmTokenHash string) (Lead, error) {
 	if strings.TrimSpace(consentIP) == "" {
 		return Lead{}, ErrMissingConsentIP
 	}
@@ -34,10 +38,11 @@ func Capture(email shared.EmailAddress, source string, consentAt time.Time, cons
 		return Lead{}, ErrMissingConsentTime
 	}
 	return Lead{
-		Email:     email,
-		Source:    source,
-		ConsentAt: consentAt,
-		ConsentIP: consentIP,
+		Email:            email,
+		Source:           source,
+		ConsentAt:        consentAt,
+		ConsentIP:        consentIP,
+		ConfirmTokenHash: confirmTokenHash,
 	}, nil
 }
 

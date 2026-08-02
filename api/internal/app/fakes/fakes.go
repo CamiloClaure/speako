@@ -537,6 +537,20 @@ func (r *LeadRepo) GetByEmail(ctx context.Context, email shared.EmailAddress) (l
 	return l, nil
 }
 
+func (r *LeadRepo) GetByConfirmTokenHash(ctx context.Context, hash string) (leads.Lead, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Err != nil {
+		return leads.Lead{}, r.Err
+	}
+	for _, l := range r.byEmail {
+		if l.ConfirmTokenHash != "" && l.ConfirmTokenHash == hash {
+			return l, nil
+		}
+	}
+	return leads.Lead{}, ErrNotFound
+}
+
 func (r *LeadRepo) List(ctx context.Context) ([]leads.Lead, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

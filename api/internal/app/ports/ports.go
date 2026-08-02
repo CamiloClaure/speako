@@ -122,6 +122,7 @@ type LeadRepo interface {
 	Create(ctx context.Context, l leads.Lead) error
 	Save(ctx context.Context, l leads.Lead) error
 	GetByEmail(ctx context.Context, email shared.EmailAddress) (leads.Lead, error)
+	GetByConfirmTokenHash(ctx context.Context, hash string) (leads.Lead, error)
 	List(ctx context.Context) ([]leads.Lead, error)
 }
 
