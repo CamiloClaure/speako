@@ -6,6 +6,11 @@ import { Entrar } from "./routes/public/Entrar";
 import { Painel } from "./routes/app/Painel";
 import { Agendar } from "./routes/app/Agendar";
 import { Aulas } from "./routes/app/Aulas";
+import { Creditos } from "./routes/app/Creditos";
+import { Materiais } from "./routes/app/Materiais";
+import { Compras } from "./routes/app/Compras";
+import { Termos, Privacidade } from "./routes/public/Legal";
+import { CheckoutSucesso, CheckoutPendente, CheckoutErro } from "./routes/checkout/Checkout";
 import { Button, Skeleton } from "./design/primitives";
 
 export function App() {
@@ -21,6 +26,14 @@ export function App() {
               <Route path="/painel" element={<Protected><Painel /></Protected>} />
               <Route path="/painel/agendar" element={<Protected><Agendar /></Protected>} />
               <Route path="/painel/aulas" element={<Protected><Aulas /></Protected>} />
+              <Route path="/painel/creditos" element={<Protected><Creditos /></Protected>} />
+              <Route path="/painel/materiais" element={<Protected><Materiais /></Protected>} />
+              <Route path="/painel/compras" element={<Protected><Compras /></Protected>} />
+              <Route path="/checkout/sucesso" element={<CheckoutSucesso />} />
+              <Route path="/checkout/pendente" element={<CheckoutPendente />} />
+              <Route path="/checkout/erro" element={<CheckoutErro />} />
+              <Route path="/termos" element={<Termos />} />
+              <Route path="/privacidade" element={<Privacidade />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </main>

@@ -9,6 +9,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
+    // A cloudflared quick tunnel arrives with a random *.trycloudflare.com
+    // Host header, which Vite rejects by default.
+    allowedHosts: [".trycloudflare.com"],
     proxy: {
       // ponytail: hardcoded because the local API port never moves; make it
       // configurable the day someone actually runs it elsewhere.
