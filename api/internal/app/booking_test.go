@@ -34,7 +34,7 @@ func newBookingHarness(t *testing.T) bookingHarness {
 		clock:        &fakes.Clock{},
 		idgen:        &fakes.IDGen{},
 	}
-	h.uc = NewBooking(h.ledger, h.bookings, h.availability, h.tx, h.clock, h.idgen)
+	h.uc = NewBooking(h.ledger, h.bookings, h.availability, h.tx, h.clock, h.idgen, DefaultBookingPolicy())
 	return h
 }
 

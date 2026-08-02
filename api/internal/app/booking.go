@@ -16,14 +16,23 @@ var (
 	ErrSlotUnavailable = shared.NewDomainError("slot.unavailable", "slot is not available")
 )
 
-const (
-	// minNotice is the minimum lead time to book a lesson. The domain keeps the
-	// rule; the default value lives here until a session makes it configurable.
-	minNotice = 12 * time.Hour
-	// freeCancelHours is how long before a slot a student may cancel and keep
-	// the credit.
-	freeCancelHours = 24 * time.Hour
-)
+// BookingPolicy carries the tunable half of the scheduling rules. The domain
+// owns what the rules mean; these are the numbers the teacher chooses, and
+// they come from configuration so the deployed value and the documented one
+// cannot silently disagree.
+type BookingPolicy struct {
+	// MinNotice is the minimum lead time to book a lesson.
+	MinNotice time.Duration
+	// FreeCancel is how long before a slot a student may cancel and keep the credit.
+	FreeCancel time.Duration
+	// MeetingURL is the external video room attached to every booking.
+	MeetingURL string
+}
+
+// DefaultBookingPolicy matches the documented defaults in .env.example.
+func DefaultBookingPolicy() BookingPolicy {
+	return BookingPolicy{MinNotice: 12 * time.Hour, FreeCancel: 24 * time.Hour}
+}
 
 // Booking runs the scheduling lifecycle: showing what is free, atomically
 // spending a credit to take it, and applying the domain's cancellation policy.
@@ -34,6 +43,7 @@ type Booking struct {
 	tx           ports.TxManager
 	clock        ports.Clock
 	idgen        ports.IDGen
+	policy       BookingPolicy
 }
 
 // NewBooking wires the scheduling use cases to their ports.
@@ -44,6 +54,7 @@ func NewBooking(
 	tx ports.TxManager,
 	clock ports.Clock,
 	idgen ports.IDGen,
+	policy BookingPolicy,
 ) *Booking {
 	return &Booking{
 		ledger:       ledger,
@@ -52,6 +63,7 @@ func NewBooking(
 		tx:           tx,
 		clock:        clock,
 		idgen:        idgen,
+		policy:       policy,
 	}
 }
 
@@ -92,7 +104,7 @@ func (uc *Booking) BookLesson(ctx context.Context, userID shared.ID, slotStart t
 		if err != nil {
 			return err
 		}
-		if err := scheduling.CanBook(slotStart, now, minNotice); err != nil {
+		if err := scheduling.CanBook(slotStart, now, uc.policy.MinNotice); err != nil {
 			return err
 		}
 		ledger, err := uc.ledger.Get(ctx, userID)
@@ -109,7 +121,7 @@ func (uc *Booking) BookLesson(ctx context.Context, userID shared.ID, slotStart t
 		if err := uc.ledger.Append(ctx, userID, entries[len(entries)-1]); err != nil {
 			return err
 		}
-		booking, err := scheduling.NewBooking(bookingID, userID, slot, now, minNotice)
+		booking, err := scheduling.NewBooking(bookingID, userID, slot, now, uc.policy.MinNotice)
 		if err != nil {
 			return err
 		}
@@ -128,7 +140,7 @@ func (uc *Booking) CancelBooking(ctx context.Context, userID shared.ID, bookingI
 	if booking.Status != scheduling.StatusScheduled {
 		return nil // a cancellation is applied once; redeliveries change nothing
 	}
-	decision := scheduling.CancelOutcome(booking, uc.clock.Now(), scheduling.CancelledByStudent, freeCancelHours)
+	decision := scheduling.CancelOutcome(booking, uc.clock.Now(), scheduling.CancelledByStudent, uc.policy.FreeCancel)
 	return uc.tx.InTx(ctx, func(ctx context.Context) error {
 		if decision == scheduling.RefundCredit {
 			// ponytail: a refunded credit never expires; restoring the original
