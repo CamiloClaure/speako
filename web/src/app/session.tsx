@@ -11,7 +11,7 @@ import { ApiError, api, type User } from "../api/client";
 type SessionState = {
   user: User | null;
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<User | null>;
   signOut: () => Promise<void>;
 };
 
@@ -23,13 +23,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      setUser(await api.me());
+      const fetched = await api.me();
+      setUser(fetched);
+      return fetched;
     } catch (err) {
       // 401 is the ordinary "not signed in" answer, not a failure worth showing.
       if (!(err instanceof ApiError && err.code === "unauthenticated")) {
         console.error("session lookup failed", err);
       }
       setUser(null);
+      return null;
     } finally {
       setLoading(false);
     }

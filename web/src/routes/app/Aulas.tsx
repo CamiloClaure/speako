@@ -70,11 +70,6 @@ export function Aulas() {
                 </p>
               </div>
               <div className="flex gap-2">
-                {b.meeting_url && (
-                  <a href={b.meeting_url} target="_blank" rel="noreferrer">
-                    <Button size="sm">Entrar na aula</Button>
-                  </a>
-                )}
                 <Button size="sm" variant="danger" onClick={() => setConfirming(b)}>
                   Cancelar
                 </Button>

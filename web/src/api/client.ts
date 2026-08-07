@@ -39,10 +39,13 @@ export class ApiError extends Error {
 /** pt-BR copy for the cases a student can actually act on. */
 const MESSAGES: Partial<Record<ErrorCode, string>> = {
   unauthenticated: "Sua sessão expirou. Entre novamente.",
+  forbidden: "Esta área é exclusiva para alunos. Sua conta de professora não tem acesso aqui.",
   insufficient_credits: "Você não tem créditos suficientes para esta aula.",
   slot_taken: "Alguém reservou este horário primeiro. Escolha outro.",
   too_late_to_book: "Este horário está muito próximo para ser agendado.",
   too_late_to_cancel: "Faltam menos de 24h para a aula.",
+  validation_failed: "Alguns dados não são válidos. Confira o formulário e tente de novo.",
+  payment_failed: "Não conseguimos processar o pagamento agora. Tente novamente em instantes.",
   rate_limited: "Muitas tentativas. Aguarde um minuto e tente de novo.",
   not_found: "Não encontramos o que você procura.",
   invalid_credentials: "E-mail ou senha incorretos.",
@@ -84,7 +87,6 @@ export type Product = {
   id: string;
   slug: string;
   title: string;
-  description?: string;
   kind: "material" | "pack";
   price_cents: number;
   credits?: number;
@@ -113,21 +115,19 @@ export type Booking = {
   status: string;
   start: string;
   end: string;
-  meeting_url?: string;
 };
 
 export type Order = {
   id: string;
   status: string;
   amount_cents: number;
-  created_at?: string;
-  product_slug?: string;
+  created_at: string;
 };
 
 export type Material = {
+  id: string;
   slug: string;
   title: string;
-  granted_at?: string;
 };
 
 // --- endpoints -------------------------------------------------------------
