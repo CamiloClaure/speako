@@ -1,7 +1,6 @@
 package http
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -36,8 +35,8 @@ func (r *Router) handleAdminGetAvailability(w http.ResponseWriter, req *http.Req
 
 func (r *Router) handleAdminPutAvailability(w http.ResponseWriter, req *http.Request, _ identity.User) {
 	var body dto.Availability
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, validationErrorf("corpo inválido"))
+	if err := decodeJSON(req, &body); err != nil {
+		writeError(w, err)
 		return
 	}
 	rules := make([]scheduling.AvailabilityRule, 0, len(body.Rules))
@@ -85,8 +84,8 @@ func (r *Router) handleAdminBookingStatus(w http.ResponseWriter, req *http.Reque
 	var body struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, validationErrorf("corpo inválido"))
+	if err := decodeJSON(req, &body); err != nil {
+		writeError(w, err)
 		return
 	}
 	id := shared.ID(req.PathValue("id"))
@@ -125,8 +124,8 @@ func (r *Router) handleAdminOrders(w http.ResponseWriter, req *http.Request, _ i
 
 func (r *Router) handleAdminCreateProduct(w http.ResponseWriter, req *http.Request, _ identity.User) {
 	var body dto.AdminProductInput
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, validationErrorf("corpo inválido"))
+	if err := decodeJSON(req, &body); err != nil {
+		writeError(w, err)
 		return
 	}
 	product, err := catalog.NewProduct(

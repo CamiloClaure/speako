@@ -28,6 +28,7 @@ type testRig struct {
 	mailer       *fakes.Mailer
 	users        *fakes.UserRepo
 	availability *fakes.AvailabilityRepo
+	bookings     *fakes.BookingRepo
 }
 
 func newTestRig(t *testing.T) *testRig {
@@ -40,13 +41,14 @@ func newTestRig(t *testing.T) *testRig {
 	tx := &fakes.TxManager{}
 	availability := &fakes.AvailabilityRepo{}
 	users := &fakes.UserRepo{}
+	bookings := &fakes.BookingRepo{}
 
 	auth := app.NewAuth(
 		users, &fakes.SessionRepo{}, &fakes.LoginTokenRepo{},
 		mailer, nil, tx, clock, idgen, tokengen, &fakes.PasswordHasher{}, magicBase, 30*24*time.Hour,
 	)
 	catalog := app.NewCatalog(&fakes.ProductRepo{})
-	booking := app.NewBooking(&fakes.CreditLedgerRepo{}, &fakes.BookingRepo{}, availability, tx, clock, idgen, app.DefaultBookingPolicy())
+	booking := app.NewBooking(&fakes.CreditLedgerRepo{}, bookings, availability, tx, clock, idgen, app.DefaultBookingPolicy())
 	purchase := app.NewPurchase(
 		&fakes.ProductRepo{}, &fakes.OrderRepo{}, &fakes.UserRepo{},
 		&fakes.EntitlementRepo{}, &fakes.CreditLedgerRepo{}, &fakes.PaymentEventRepo{},
@@ -54,7 +56,7 @@ func newTestRig(t *testing.T) *testRig {
 	)
 	materials := app.NewMaterials(&fakes.ProductRepo{}, &fakes.EntitlementRepo{}, &fakes.FileStorage{})
 	leads := app.NewLeads(&fakes.LeadRepo{}, mailer, clock, tokengen, "https://app.speako.test/leads/confirm?token=")
-	teacher := app.NewTeacher(&fakes.ProductRepo{}, &fakes.OrderRepo{}, &fakes.BookingRepo{},
+	teacher := app.NewTeacher(&fakes.ProductRepo{}, &fakes.OrderRepo{}, bookings,
 		availability, &fakes.CreditLedgerRepo{}, users, tx, clock, idgen)
 
 	config := apihttp.Config{
@@ -63,7 +65,7 @@ func newTestRig(t *testing.T) *testRig {
 		SessionTTL:   30 * 24 * time.Hour,
 	}
 	mux := apihttp.NewRouter(auth, purchase, booking, materials, catalog, leads, teacher, config)
-	return &testRig{mux: mux, mailer: mailer, users: users, availability: availability}
+	return &testRig{mux: mux, mailer: mailer, users: users, availability: availability, bookings: bookings}
 }
 
 // signIn drives the full magic-link flow through the router and returns the
@@ -318,6 +320,50 @@ func TestStudentRoutesRejectATeacher(t *testing.T) {
 		} else if envelope.Error.Code != "forbidden" {
 			t.Errorf("%s %s: code = %q, want forbidden", rt.method, rt.path, envelope.Error.Code)
 		}
+	}
+}
+
+// A bad status value on this endpoint is app.ErrInvalidAttendance - the
+// caller sent something that is not "completed" or "no_show". That is the
+// caller's mistake, not the server falling over, so it must map to 422
+// validation_failed (matching docs/api.yaml) instead of falling through to
+// the default 500 internal branch.
+func TestAdminBookingStatusRejectsInvalidStatus(t *testing.T) {
+	rig := newTestRig(t)
+	cookie := signInAs(t, rig, "teacher@test.com", identity.RoleTeacher)
+
+	slot, err := shared.NewTimeSlot(
+		time.Date(2026, time.January, 7, 16, 0, 0, 0, time.UTC),
+		time.Date(2026, time.January, 7, 17, 0, 0, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatalf("build slot: %v", err)
+	}
+	booking := scheduling.Booking{
+		ID:        shared.ID("booking-1"),
+		StudentID: shared.ID("student-1"),
+		Slot:      slot,
+		Status:    scheduling.StatusScheduled,
+	}
+	if err := rig.bookings.Create(context.Background(), booking); err != nil {
+		t.Fatalf("seed booking: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/bookings/booking-1/status",
+		strings.NewReader(`{"status":"not-a-real-status"}`))
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusUnprocessableEntity, rr.Body.String())
+	}
+	var envelope dto.ErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if envelope.Error.Code != "validation_failed" {
+		t.Errorf("code = %q, want %q", envelope.Error.Code, "validation_failed")
 	}
 }
 

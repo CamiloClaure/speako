@@ -8,11 +8,17 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/camiloclaure/speako/api/internal/adapters/devstub"
+	"github.com/camiloclaure/speako/api/internal/adapters/password"
 	"github.com/camiloclaure/speako/api/internal/adapters/sqlite"
+	"github.com/camiloclaure/speako/api/internal/adapters/system"
+	"github.com/camiloclaure/speako/api/internal/app"
+	"github.com/camiloclaure/speako/api/internal/app/ports"
 	"github.com/camiloclaure/speako/api/internal/config"
 	"github.com/camiloclaure/speako/api/internal/domain/catalog"
 	"github.com/camiloclaure/speako/api/internal/domain/credit"
@@ -27,6 +33,8 @@ const usage = `speako-cli <command>
   seed                           create the teacher, availability and demo products
   grant-credit <email> <n>       add credits to a student's ledger
   export-leads                   print confirmed leads as CSV
+  login-link <email>             print a one-time sign-in link for an account
+  set-password <email> <pass>    set an account's password
 `
 
 const teacherID = shared.ID("teacher-1")
@@ -69,6 +77,16 @@ func dispatch(ctx context.Context, cmd string, args []string) error {
 		return grantCredit(ctx, db, args[0], args[1])
 	case "export-leads":
 		return exportLeads(ctx, db)
+	case "login-link":
+		if len(args) < 1 {
+			return fmt.Errorf("usage: speako-cli login-link <email>")
+		}
+		return loginLink(ctx, db, cfg, args[0])
+	case "set-password":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: speako-cli set-password <email> <password>")
+		}
+		return setPassword(ctx, db, cfg, args[0], args[1])
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -177,5 +195,85 @@ func exportLeads(ctx context.Context, db *sql.DB) error {
 		fmt.Printf("%s,%s,%s,%s\n", l.Email, l.Source,
 			l.ConsentAt.UTC().Format(time.RFC3339), l.ConfirmedAt.UTC().Format(time.RFC3339))
 	}
+	return nil
+}
+
+// stdoutMailer is the dev mailer with its magic-link method redirected to
+// stdout: the operator running the CLI over SSH needs the link on the stream
+// they can read, not on the stderr/slog stream the dev mailer logs to. Every
+// other method is inherited unchanged - the CLI never sends those.
+type stdoutMailer struct {
+	devstub.Mailer
+}
+
+func (stdoutMailer) MagicLink(_ context.Context, _ shared.EmailAddress, link string) error {
+	fmt.Println(link)
+	return nil
+}
+
+// newAuth builds an app.Auth the same way cmd/api/main.go does, except the
+// mailer prints to stdout instead of sending mail, and Google sign-in stays
+// off - the CLI never needs to verify a Google token.
+func newAuth(db *sql.DB, cfg config.Config) *app.Auth {
+	return app.NewAuth(
+		sqlite.NewUserRepo(db),
+		sqlite.NewSessionRepo(db),
+		sqlite.NewLoginTokenRepo(db),
+		stdoutMailer{},
+		nil,
+		sqlite.NewTxManager(db),
+		system.Clock{},
+		system.IDGen{},
+		system.TokenGen{},
+		password.Bcrypt{},
+		cfg.PublicURL+"/entrar?token=",
+		cfg.SessionTTL,
+	)
+}
+
+// lookupUser finds the account behind email, turning ports.ErrNotFound into a
+// message that names the address - login-link and set-password must both
+// refuse a vanished account before touching it, not after: see
+// sqlite.UserRepo.SetPasswordHash, which cannot itself tell "updated" from
+// "matched nothing".
+func lookupUser(ctx context.Context, db *sql.DB, email shared.EmailAddress) (identity.User, error) {
+	user, err := sqlite.NewUserRepo(db).GetByEmail(ctx, email)
+	if errors.Is(err, ports.ErrNotFound) {
+		return identity.User{}, fmt.Errorf("no account for %s", email)
+	}
+	return user, err
+}
+
+// loginLink prints a one-time sign-in URL for email to stdout. It refuses an
+// unknown address up front rather than letting RequestMagicLink's "always
+// succeeds" behaviour (by design - see its doc comment) mint a link for
+// nobody.
+func loginLink(ctx context.Context, db *sql.DB, cfg config.Config, rawEmail string) error {
+	email, err := shared.ParseEmail(rawEmail)
+	if err != nil {
+		return err
+	}
+	if _, err := lookupUser(ctx, db, email); err != nil {
+		return err
+	}
+	return newAuth(db, cfg).RequestMagicLink(ctx, string(email))
+}
+
+// setPassword sets email's password, going through app.Auth.SetPassword so
+// validation, hashing and storage stay in the one place that already does it
+// for the HTTP registration path.
+func setPassword(ctx context.Context, db *sql.DB, cfg config.Config, rawEmail, plain string) error {
+	email, err := shared.ParseEmail(rawEmail)
+	if err != nil {
+		return err
+	}
+	user, err := lookupUser(ctx, db, email)
+	if err != nil {
+		return err
+	}
+	if err := newAuth(db, cfg).SetPassword(ctx, user.ID, plain); err != nil {
+		return err
+	}
+	fmt.Printf("password set for %s\n", email)
 	return nil
 }

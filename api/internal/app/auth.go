@@ -34,8 +34,8 @@ var (
 	ErrEmailTaken = shared.NewDomainError("auth.email_taken", "email already registered")
 )
 
-// magicLinkTTL is how long a magic link stays redeemable.
-const magicLinkTTL = 15 * time.Minute
+// MagicLinkTTL is how long a magic link stays redeemable.
+const MagicLinkTTL = 15 * time.Minute
 
 // studentTimezone is the default timezone for new accounts; the platform is
 // Brazilian-run and a learner can change it later.
@@ -140,7 +140,7 @@ func (uc *Auth) RequestMagicLink(ctx context.Context, rawEmail string) error {
 	if err := uc.tokens.Create(ctx, ports.LoginToken{
 		TokenHash: hash,
 		Email:     email,
-		ExpiresAt: uc.clock.Now().Add(magicLinkTTL),
+		ExpiresAt: uc.clock.Now().Add(MagicLinkTTL),
 	}); err != nil {
 		return err
 	}

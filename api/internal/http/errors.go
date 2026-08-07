@@ -58,6 +58,7 @@ var validationErrors = []error{
 	scheduling.ErrInvalidRule,
 	scheduling.ErrInvalidException,
 	ordering.ErrIllegalTransition,
+	app.ErrInvalidAttendance,
 }
 
 // writeError is the single place that maps a domain error to a status code
