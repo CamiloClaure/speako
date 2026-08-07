@@ -20,18 +20,31 @@ command -v go >/dev/null || {
   exit 1
 }
 
-WEB_PORT=5173
-API_PORT=8080
 DB="$PWD/api/speako.dev.db"
 
-# El túnel apunta a :$WEB_PORT y Vite proxya a :$API_PORT; si cualquiera está
-# ocupado, el proceso equivocado termina expuesto a Internet.
-for PORT in "$WEB_PORT" "$API_PORT"; do
-  if ss -ltn "sport = :$PORT" | grep -q LISTEN; then
-    echo "==> puerto $PORT ocupado; libéralo antes de arrancar el túnel" >&2
-    exit 1
-  fi
-done
+# Primer puerto libre desde $1, saltando el que ya elegimos ($2, opcional).
+# Nunca reusamos un puerto ocupado: el túnel serviría el proceso equivocado y
+# el proxy de Vite hablaría con la API de otra persona.
+pick_port() {
+  p=$1
+  while [ "$p" = "$2" ] || ss -ltn "sport = :$p" | grep -q LISTEN; do
+    p=$((p + 1))
+    [ "$p" -gt $(($1 + 50)) ] && {
+      echo "==> no hay puerto libre entre $1 y $p" >&2
+      exit 1
+    }
+  done
+  echo "$p"
+}
+
+WEB_PORT=$(pick_port 5173)
+API_PORT=$(pick_port 8080 "$WEB_PORT")
+
+[ "$WEB_PORT" = 5173 ] || echo "==> 5173 ocupado, SPA en $WEB_PORT"
+[ "$API_PORT" = 8080 ] || echo "==> 8080 ocupado, API en $API_PORT"
+
+# Vite lee ambos: sirve en WEB_PORT con strictPort y proxya /api a API_PORT.
+export SPEAKO_WEB_PORT="$WEB_PORT" SPEAKO_API_PORT="$API_PORT"
 
 # Idempotente y no destructivo. Para una base limpia con profesora, horarios y
 # productos: `make seed` (eso sí borra la base).
@@ -58,7 +71,7 @@ fi
 # La API tiene que arrancar sabiendo la URL pública: SPEAKO_PUBLIC_URL es la
 # base de los links mágicos. Con el default (localhost:5173) quien revisa desde
 # afuera recibe un link que sólo abre en esta máquina.
-(cd api && SPEAKO_DB_PATH="$DB" SPEAKO_PUBLIC_URL="$URL" go run ./cmd/api) &
+(cd api && SPEAKO_DB_PATH="$DB" SPEAKO_PUBLIC_URL="$URL" SPEAKO_ADDR=":$API_PORT" go run ./cmd/api) &
 API_PID=$!
 
 echo ""
@@ -67,4 +80,6 @@ echo "==> Link de acceso para la profesora:"
 echo "    (cd api && SPEAKO_DB_PATH=$DB SPEAKO_PUBLIC_URL=$URL go run ./cmd/speako-cli login-link professora@speako.com.br)"
 echo ""
 
-cd web && npm run dev -- --port "$WEB_PORT"
+# Sin --port: vite.config.ts ya lee SPEAKO_WEB_PORT, y una sola fuente evita
+# que la bandera y el config discrepen.
+cd web && npm run dev
