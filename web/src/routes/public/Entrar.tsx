@@ -42,7 +42,15 @@ export function Entrar() {
       .verifyMagicLink(token)
       .then(() => refresh())
       .then((signedIn) => {
-        navigate(signedIn ? landingPath(signedIn.role) : "/painel", { replace: true });
+        if (!signedIn) {
+          // The magic link verified, but we could not confirm who signed in
+          // (a transient /me failure) - landing on a dashboard would be a
+          // guess about her role. Stay here and let her retry.
+          setError("Não foi possível confirmar seu acesso. Tente novamente.");
+          setLinkState("idle");
+          return;
+        }
+        navigate(landingPath(signedIn.role), { replace: true });
       })
       .catch((err) => {
         setError(

@@ -69,6 +69,10 @@ function Protected({ children }: { children: ReactNode }) {
     // Remember where they were headed so sign-in can return them there.
     return <Navigate to="/entrar" replace state={{ from: location.pathname }} />;
   }
+  if (user.role !== "student") {
+    // Every student API 403s a teacher/admin session - send her to her own area instead.
+    return <Navigate to="/admin/agenda" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -120,12 +124,16 @@ function Header() {
         <nav className="flex items-center gap-2">
           {user ? (
             <>
-              <Link to="/painel" className="px-3 py-2 font-semibold text-muted hover:text-ink">
-                Painel
-              </Link>
-              <Link to="/painel/aulas" className="px-3 py-2 font-semibold text-muted hover:text-ink">
-                Aulas
-              </Link>
+              {user.role === "student" && (
+                <>
+                  <Link to="/painel" className="px-3 py-2 font-semibold text-muted hover:text-ink">
+                    Painel
+                  </Link>
+                  <Link to="/painel/aulas" className="px-3 py-2 font-semibold text-muted hover:text-ink">
+                    Aulas
+                  </Link>
+                </>
+              )}
               {(user.role === "teacher" || user.role === "admin") && (
                 <Link to="/admin/agenda" className="px-3 py-2 font-semibold text-brand-700 hover:text-brand-800">
                   Admin

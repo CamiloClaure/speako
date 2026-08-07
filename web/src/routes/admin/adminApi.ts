@@ -63,7 +63,6 @@ export type NewProduct = {
   price_cents: number;
   credits?: number;
   validity_days?: number;
-  description?: string;
 };
 
 // --- endpoints --------------------------------------------------------------

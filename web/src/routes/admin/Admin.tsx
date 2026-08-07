@@ -438,7 +438,6 @@ type ProductForm = {
   price: string;
   credits: string;
   validity: string;
-  description: string;
 };
 
 const EMPTY_FORM: ProductForm = {
@@ -447,7 +446,6 @@ const EMPTY_FORM: ProductForm = {
   price: "",
   credits: "",
   validity: "",
-  description: "",
 };
 
 export function AdminProdutos() {
@@ -483,7 +481,6 @@ export function AdminProdutos() {
         ...(form.kind === "pack"
           ? { credits: Number(form.credits), validity_days: Number(form.validity) }
           : {}),
-        ...(form.description.trim() ? { description: form.description.trim() } : {}),
       });
       setCreated(true);
       setForm(EMPTY_FORM);
@@ -579,12 +576,6 @@ export function AdminProdutos() {
               />
             </div>
           )}
-          <Field
-            label="Descrição (opcional)"
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-            placeholder="O que o aluno recebe?"
-          />
           <div className="flex items-center gap-3">
             {created && <span className="text-sm font-medium text-success-text">Produto criado</span>}
             <Button type="submit" loading={saving}>
