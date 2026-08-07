@@ -35,6 +35,7 @@ const (
 	codeInvalidCredentials  errorCode = "invalid_credentials"
 	codeEmailTaken          errorCode = "email_taken"
 	codeInternal            errorCode = "internal"
+	codeNotImplemented      errorCode = "not_implemented"
 )
 
 // validationErrors are the domain sentinels that describe a caller mistake,
@@ -101,7 +102,7 @@ func writeError(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusUnprocessableEntity, codeValidationFailed,
 			"that time is not an available slot"
 	case errors.Is(err, errNotImplemented):
-		status, code, message = http.StatusInternalServerError, codeInternal, "not implemented"
+		status, code, message = http.StatusNotImplemented, codeNotImplemented, "not implemented"
 	case isValidation(err):
 		status, code, message = http.StatusUnprocessableEntity, codeValidationFailed, err.Error()
 	default:

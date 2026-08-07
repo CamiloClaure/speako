@@ -225,6 +225,25 @@ func (r *Router) requireTeacher(next func(http.ResponseWriter, *http.Request, id
 	}
 }
 
+// requireStudent gates the student-only surface (credits, orders, materials,
+// bookings, checkout). A strict "is a student" check, not "is not a
+// teacher" - an admin is an ops account, not a customer, and must be
+// refused here too.
+func (r *Router) requireStudent(next func(http.ResponseWriter, *http.Request, identity.User)) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		user, ok := userFrom(req.Context())
+		if !ok {
+			writeError(w, errUnauthenticated)
+			return
+		}
+		if !user.Role.IsStudent() {
+			writeError(w, errForbidden)
+			return
+		}
+		next(w, req, user)
+	}
+}
+
 const (
 	loginLimiterMax    = 5
 	loginLimiterIPMax  = 20

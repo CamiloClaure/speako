@@ -101,15 +101,15 @@ func (r *Router) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/logout", r.handleLogout)
 
 	mux.HandleFunc("GET /api/v1/me", r.requireUser(r.handleMe))
-	mux.HandleFunc("GET /api/v1/me/credits", r.requireUser(r.handleCredits))
-	mux.HandleFunc("GET /api/v1/me/orders", r.requireUser(r.handleOrders))
-	mux.HandleFunc("GET /api/v1/me/materials", r.requireUser(r.handleMaterials))
-	mux.HandleFunc("GET /api/v1/me/materials/{slug}/download", r.requireUser(r.handleMaterialDownload))
-	mux.HandleFunc("GET /api/v1/me/bookings", r.requireUser(r.handleBookings))
+	mux.HandleFunc("GET /api/v1/me/credits", r.requireStudent(r.handleCredits))
+	mux.HandleFunc("GET /api/v1/me/orders", r.requireStudent(r.handleOrders))
+	mux.HandleFunc("GET /api/v1/me/materials", r.requireStudent(r.handleMaterials))
+	mux.HandleFunc("GET /api/v1/me/materials/{slug}/download", r.requireStudent(r.handleMaterialDownload))
+	mux.HandleFunc("GET /api/v1/me/bookings", r.requireStudent(r.handleBookings))
 
-	mux.HandleFunc("POST /api/v1/checkout", r.requireUser(r.handleCheckout))
-	mux.HandleFunc("POST /api/v1/bookings", r.requireUser(r.handleBookLesson))
-	mux.HandleFunc("DELETE /api/v1/bookings/{id}", r.requireUser(r.handleCancelBooking))
+	mux.HandleFunc("POST /api/v1/checkout", r.requireStudent(r.handleCheckout))
+	mux.HandleFunc("POST /api/v1/bookings", r.requireStudent(r.handleBookLesson))
+	mux.HandleFunc("DELETE /api/v1/bookings/{id}", r.requireStudent(r.handleCancelBooking))
 
 	mux.HandleFunc("POST /api/v1/webhooks/mercadopago", r.handleMercadoPagoWebhook)
 

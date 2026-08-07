@@ -67,20 +67,27 @@ func newTestRig(t *testing.T) *testRig {
 }
 
 // signIn drives the full magic-link flow through the router and returns the
-// session cookie for a fresh account.
+// session cookie for a fresh student account.
 func signIn(t *testing.T, rig *testRig) *http.Cookie {
 	t.Helper()
+	return signInAs(t, rig, studentEmail, identity.RoleStudent)
+}
+
+// signInAs drives the full magic-link flow through the router for a fresh
+// account of the given role and returns its session cookie.
+func signInAs(t *testing.T, rig *testRig, email string, role identity.Role) *http.Cookie {
+	t.Helper()
 	user, err := identity.NewUser(shared.ID("00000000-0000-4000-8000-000000000001"),
-		shared.EmailAddress(studentEmail), "Student", identity.RoleStudent, "America/Sao_Paulo")
+		shared.EmailAddress(email), "Test User", role, "America/Sao_Paulo")
 	if err != nil {
-		t.Fatalf("build student: %v", err)
+		t.Fatalf("build user: %v", err)
 	}
 	if err := rig.users.Create(context.Background(), user); err != nil {
-		t.Fatalf("seed student: %v", err)
+		t.Fatalf("seed user: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/magic-link",
-		strings.NewReader(`{"email":"`+studentEmail+`"}`))
+		strings.NewReader(`{"email":"`+email+`"}`))
 	rr := httptest.NewRecorder()
 	rig.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusAccepted {
@@ -225,5 +232,67 @@ func TestAdminRoutesRejectAnonymous(t *testing.T) {
 	rig.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+// studentRoutes are every route requireStudent gates. A teacher who reaches
+// any of these could spend a credit she cannot own or pull a student's
+// signed material URL - the defect this round closes.
+var studentRoutes = []struct {
+	method string
+	path   string
+}{
+	{http.MethodGet, "/api/v1/me/credits"},
+	{http.MethodGet, "/api/v1/me/orders"},
+	{http.MethodGet, "/api/v1/me/materials"},
+	{http.MethodGet, "/api/v1/me/materials/some-material/download"},
+	{http.MethodGet, "/api/v1/me/bookings"},
+	{http.MethodPost, "/api/v1/checkout"},
+	{http.MethodPost, "/api/v1/bookings"},
+	{http.MethodDelete, "/api/v1/bookings/some-booking-id"},
+}
+
+// A signed-in teacher reaching for the student surface must be refused by
+// the API - she is signed in, but she is not a student.
+func TestStudentRoutesRejectATeacher(t *testing.T) {
+	rig := newTestRig(t)
+	cookie := signInAs(t, rig, "teacher@test.com", identity.RoleTeacher)
+
+	for _, rt := range studentRoutes {
+		req := httptest.NewRequest(rt.method, rt.path, nil)
+		req.AddCookie(cookie)
+		rr := httptest.NewRecorder()
+		rig.mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("%s %s: status = %d, want 403; body=%s", rt.method, rt.path, rr.Code, rr.Body.String())
+		}
+		var envelope dto.ErrorEnvelope
+		if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+			t.Errorf("%s %s: unmarshal error body: %v", rt.method, rt.path, err)
+		} else if envelope.Error.Code != "forbidden" {
+			t.Errorf("%s %s: code = %q, want forbidden", rt.method, rt.path, envelope.Error.Code)
+		}
+	}
+}
+
+// And an anonymous caller gets 401, not 403 - the two are different answers.
+func TestStudentRoutesRejectAnonymous(t *testing.T) {
+	rig := newTestRig(t)
+
+	for _, rt := range studentRoutes {
+		req := httptest.NewRequest(rt.method, rt.path, nil)
+		rr := httptest.NewRecorder()
+		rig.mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s: status = %d, want 401; body=%s", rt.method, rt.path, rr.Code, rr.Body.String())
+		}
+		var envelope dto.ErrorEnvelope
+		if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+			t.Errorf("%s %s: unmarshal error body: %v", rt.method, rt.path, err)
+		} else if envelope.Error.Code != "unauthenticated" {
+			t.Errorf("%s %s: code = %q, want unauthenticated", rt.method, rt.path, envelope.Error.Code)
+		}
 	}
 }
