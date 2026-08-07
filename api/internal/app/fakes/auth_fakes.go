@@ -164,6 +164,23 @@ func (h *PasswordHasher) Matches(hash, plain string) bool {
 	return hash == fakeHashTag+plain
 }
 
+// GoogleVerifier is a fake ports.GoogleVerifier. Set Identity to what Verify
+// should report on success. Set Err to force a failure - use
+// ports.ErrInvalidGoogleToken to simulate a forged or expired token, or any
+// other error to simulate a JWKS outage, which SignInWithGoogle must pass
+// through unchanged rather than collapse into "invalid token".
+type GoogleVerifier struct {
+	Identity ports.GoogleIdentity
+	Err      error
+}
+
+func (v *GoogleVerifier) Verify(ctx context.Context, idToken string) (ports.GoogleIdentity, error) {
+	if v.Err != nil {
+		return ports.GoogleIdentity{}, v.Err
+	}
+	return v.Identity, nil
+}
+
 // PaymentEventRepo is an in-memory PaymentEventRepo. Claim is a real claim:
 // only the first caller for an eventID gets true, which is what a test needs
 // to prove a redelivered webhook grants nothing twice.

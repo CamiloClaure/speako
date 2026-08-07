@@ -34,6 +34,13 @@ type UserRepo interface {
 // outages and, worse, goes on to create duplicate records.
 var ErrNotFound = errors.New("not found")
 
+// ErrInvalidGoogleToken is what GoogleVerifier.Verify returns for a token
+// that fails verification - bad signature, wrong audience, expired, wrong
+// issuer, or an unverified email. It must never be returned for anything
+// else: a JWKS fetch failure has to surface as its own error, or a Google
+// outage would look identical to a forged token.
+var ErrInvalidGoogleToken = errors.New("invalid google token")
+
 // SessionRepo stores live sessions. Session.Token holds the hash of the cookie
 // value, never the raw token, so a database leak cannot be replayed as a login.
 type SessionRepo interface {
@@ -168,6 +175,20 @@ type Mailer interface {
 	BookingCancelled(ctx context.Context, to shared.EmailAddress, slot shared.TimeSlot) error
 	LessonReminder(ctx context.Context, to shared.EmailAddress, slot shared.TimeSlot) error
 	LeadOptIn(ctx context.Context, to shared.EmailAddress, confirmURL string) error
+}
+
+// GoogleIdentity is a Google Sign-In identity whose token has already been
+// verified: its email is safe to trust as "this really is that person's
+// Google account," which a caller-supplied email string never is.
+type GoogleIdentity struct {
+	Email shared.EmailAddress
+	Name  string
+}
+
+// GoogleVerifier verifies a Google Sign-In id_token and reports the identity
+// it attests to. Implemented in internal/adapters/google.
+type GoogleVerifier interface {
+	Verify(ctx context.Context, idToken string) (GoogleIdentity, error)
 }
 
 // Clock tells the current time; injected so use cases stay deterministic.

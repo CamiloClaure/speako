@@ -75,6 +75,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusUnauthorized, codeUnauthenticated, "authentication required"
 	case errors.Is(err, app.ErrSessionExpired), errors.Is(err, identity.ErrInvalidToken):
 		status, code, message = http.StatusUnauthorized, codeUnauthenticated, err.Error()
+	case errors.Is(err, ports.ErrInvalidGoogleToken):
+		status, code, message = http.StatusUnauthorized, codeUnauthenticated, "invalid credentials"
 	case errors.Is(err, app.ErrInvalidCredentials):
 		// Deliberately the same status, code and message every time this
 		// sentinel is returned - see app.ErrInvalidCredentials's doc comment.
@@ -101,7 +103,7 @@ func writeError(w http.ResponseWriter, err error) {
 		// hunting for another time when the real answer is "that is not a slot".
 		status, code, message = http.StatusUnprocessableEntity, codeValidationFailed,
 			"that time is not an available slot"
-	case errors.Is(err, errNotImplemented):
+	case errors.Is(err, errNotImplemented), errors.Is(err, app.ErrGoogleNotConfigured):
 		status, code, message = http.StatusNotImplemented, codeNotImplemented, "not implemented"
 	case isValidation(err):
 		status, code, message = http.StatusUnprocessableEntity, codeValidationFailed, err.Error()

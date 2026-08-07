@@ -126,6 +126,10 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type GoogleSignInRequest struct {
+	IDToken string `json:"id_token"`
+}
+
 type CheckoutRequest struct {
 	ProductSlug string `json:"product_slug"`
 	Quantity    int    `json:"quantity"`

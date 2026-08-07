@@ -43,7 +43,7 @@ func newTestRig(t *testing.T) *testRig {
 
 	auth := app.NewAuth(
 		users, &fakes.SessionRepo{}, &fakes.LoginTokenRepo{},
-		mailer, clock, idgen, tokengen, &fakes.PasswordHasher{}, magicBase, 30*24*time.Hour,
+		mailer, nil, tx, clock, idgen, tokengen, &fakes.PasswordHasher{}, magicBase, 30*24*time.Hour,
 	)
 	catalog := app.NewCatalog(&fakes.ProductRepo{})
 	booking := app.NewBooking(&fakes.CreditLedgerRepo{}, &fakes.BookingRepo{}, availability, tx, clock, idgen, app.DefaultBookingPolicy())
@@ -232,6 +232,51 @@ func TestAdminRoutesRejectAnonymous(t *testing.T) {
 	rig.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+// An unconfigured deployment (no GOOGLE_CLIENT_ID) must answer 501, not crash
+// and not set a session cookie - see app.ErrGoogleNotConfigured.
+func TestGoogleSignInWithoutConfigReturnsNotImplemented(t *testing.T) {
+	rig := newTestRig(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/google",
+		strings.NewReader(`{"id_token":"whatever"}`))
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusNotImplemented, rr.Body.String())
+	}
+	var envelope dto.ErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if envelope.Error.Code != "not_implemented" {
+		t.Errorf("code = %q, want %q", envelope.Error.Code, "not_implemented")
+	}
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "speako_session" {
+			t.Fatal("an unconfigured Google sign-in must not set a session cookie")
+		}
+	}
+}
+
+func TestGoogleSignInRejectsEmptyIDToken(t *testing.T) {
+	rig := newTestRig(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/google",
+		strings.NewReader(`{"id_token":""}`))
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusUnprocessableEntity, rr.Body.String())
+	}
+	var envelope dto.ErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if envelope.Error.Code != "validation_failed" {
+		t.Errorf("code = %q, want %q", envelope.Error.Code, "validation_failed")
 	}
 }
 

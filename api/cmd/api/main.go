@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/camiloclaure/speako/api/internal/adapters/devstub"
+	"github.com/camiloclaure/speako/api/internal/adapters/google"
 	"github.com/camiloclaure/speako/api/internal/adapters/password"
 	"github.com/camiloclaure/speako/api/internal/adapters/sqlite"
 	"github.com/camiloclaure/speako/api/internal/adapters/system"
@@ -75,13 +76,23 @@ func run(ctx context.Context) error {
 	tokengen := system.TokenGen{}
 	hasher := password.Bcrypt{}
 
+	// Google sign-in stays off (SignInWithGoogle returns ErrGoogleNotConfigured)
+	// until an operator sets GOOGLE_CLIENT_ID. Declaring the interface variable
+	// and only assigning inside this branch matters: assigning a typed nil
+	// *google.Verifier unconditionally would make googleVerifier a non-nil
+	// interface, and Auth's nil check would never fire.
+	var googleVerifier ports.GoogleVerifier
+	if cfg.GoogleClientID != "" {
+		googleVerifier = google.NewVerifier(cfg.GoogleClientID)
+	}
+
 	mailer, payments, files, err := externals(cfg)
 	if err != nil {
 		return err
 	}
 
 	// Use cases.
-	auth := app.NewAuth(users, sessions, loginTokens, mailer, clock, idgen, tokengen, hasher,
+	auth := app.NewAuth(users, sessions, loginTokens, mailer, googleVerifier, tx, clock, idgen, tokengen, hasher,
 		cfg.PublicURL+"/entrar?token=", cfg.SessionTTL)
 	purchase := app.NewPurchase(products, orders, users, entitlements, ledger, events,
 		payments, mailer, tx, clock, idgen)

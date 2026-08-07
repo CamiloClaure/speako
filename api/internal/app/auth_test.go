@@ -27,6 +27,8 @@ type authHarness struct {
 	hasher   *fakes.PasswordHasher
 	mailer   *fakes.Mailer
 	clock    *fakes.Clock
+	google   *fakes.GoogleVerifier
+	tx       *fakes.TxManager
 }
 
 func newAuthHarness(t *testing.T) authHarness {
@@ -39,9 +41,25 @@ func newAuthHarness(t *testing.T) authHarness {
 		hasher:   &fakes.PasswordHasher{},
 		mailer:   &fakes.Mailer{},
 		clock:    &fakes.Clock{NowTime: time.Date(2026, time.January, 2, 12, 0, 0, 0, time.UTC)},
+		google:   &fakes.GoogleVerifier{},
 	}
-	h.uc = NewAuth(h.users, h.sessions, h.tokens, h.mailer, h.clock, &fakes.IDGen{}, h.tokengen, h.hasher, authLoginURLBase, authSessionTTL)
+	h.tx = &fakes.TxManager{Participants: []fakes.Participant{h.users}}
+	h.uc = NewAuth(h.users, h.sessions, h.tokens, h.mailer, h.google, h.tx, h.clock, &fakes.IDGen{}, h.tokengen, h.hasher, authLoginURLBase, authSessionTTL)
 	return h
+}
+
+// signInWithGoogle sets h.google to attest to email/name and drives
+// SignInWithGoogle with a placeholder token - the fake verifier does not
+// care what the token's bytes are, only real verification does.
+func (h authHarness) signInWithGoogle(ctx context.Context, t *testing.T, email, name string) (identity.Session, error) {
+	t.Helper()
+	e, err := shared.ParseEmail(email)
+	if err != nil {
+		t.Fatalf("ParseEmail(%q): %v", email, err)
+	}
+	h.google.Identity = ports.GoogleIdentity{Email: e, Name: name}
+	h.google.Err = nil
+	return h.uc.SignInWithGoogle(ctx, "google-id-token")
 }
 
 // Sign-up IS the magic link: a first-time address must receive one, or the
@@ -85,7 +103,7 @@ func TestMagicLinkStoresOnlyHashes(t *testing.T) {
 		t.Fatalf("redeeming the link should succeed when the token is hashed: %v", err)
 	}
 
-	sess, err := h.uc.SignInWithGoogle(ctx, "ana@test.com", "Ana")
+	sess, err := h.signInWithGoogle(ctx, t, "ana@test.com", "Ana")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +175,7 @@ func TestCompleteMagicLinkCreatesAccountForFirstTimeEmail(t *testing.T) {
 func TestSignInWithGoogleCreatesAccountOnFirstSignIn(t *testing.T) {
 	h := newAuthHarness(t)
 	ctx := context.Background()
-	sess, err := h.uc.SignInWithGoogle(ctx, "google@example.com", "Bruna")
+	sess, err := h.signInWithGoogle(ctx, t, "google@example.com", "Bruna")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +198,7 @@ func TestGetMeRejectsExpiredSession(t *testing.T) {
 	if err := h.users.Create(ctx, user); err != nil {
 		t.Fatal(err)
 	}
-	sess, err := h.uc.SignInWithGoogle(ctx, "ana@test.com", "Ana")
+	sess, err := h.signInWithGoogle(ctx, t, "ana@test.com", "Ana")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +218,7 @@ func TestSignOutInvalidatesSession(t *testing.T) {
 	if err := h.users.Create(ctx, user); err != nil {
 		t.Fatal(err)
 	}
-	sess, err := h.uc.SignInWithGoogle(ctx, "ana@test.com", "Ana")
+	sess, err := h.signInWithGoogle(ctx, t, "ana@test.com", "Ana")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +237,7 @@ func TestSignInWithGoogleDoesNotCreateUserOnStorageFailure(t *testing.T) {
 	h := newAuthHarness(t)
 	h.users.Err = errors.New("database is down")
 
-	if _, err := h.uc.SignInWithGoogle(context.Background(), "ana@test.com", "Ana"); err == nil {
+	if _, err := h.signInWithGoogle(context.Background(), t, "ana@test.com", "Ana"); err == nil {
 		t.Fatal("a storage failure minted a session instead of erroring")
 	}
 	if len(h.sessions.Deleted) != 0 {
@@ -332,7 +350,7 @@ func TestRegisterWithPasswordRejectsExistingEmailWithoutOverwritingPassword(t *t
 func TestSignInWithPasswordRejectsMagicLinkOnlyAccount(t *testing.T) {
 	h := newAuthHarness(t)
 	ctx := context.Background()
-	if _, err := h.uc.SignInWithGoogle(ctx, "ana@test.com", "Ana"); err != nil {
+	if _, err := h.signInWithGoogle(ctx, t, "ana@test.com", "Ana"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.uc.SignInWithPassword(ctx, "ana@test.com", "anything12"); !errors.Is(err, ErrInvalidCredentials) {
@@ -346,7 +364,7 @@ func TestSignInWithPasswordRejectsMagicLinkOnlyAccount(t *testing.T) {
 func TestSetPasswordThenSignIn(t *testing.T) {
 	h := newAuthHarness(t)
 	ctx := context.Background()
-	if _, err := h.uc.SignInWithGoogle(ctx, "ana@test.com", "Ana"); err != nil {
+	if _, err := h.signInWithGoogle(ctx, t, "ana@test.com", "Ana"); err != nil {
 		t.Fatal(err)
 	}
 	user, err := h.users.GetByEmail(ctx, shared.EmailAddress("ana@test.com"))
@@ -361,5 +379,50 @@ func TestSetPasswordThenSignIn(t *testing.T) {
 	}
 	if err := h.uc.SetPassword(ctx, user.ID, "short"); !errors.Is(err, identity.ErrWeakPassword) {
 		t.Fatalf("SetPassword with a short password err = %v, want ErrWeakPassword", err)
+	}
+}
+
+// RegisterWithPassword's Create and SetPasswordHash must succeed or fail
+// together - see its doc comment in auth.go. This proves it against the
+// fake's real rollback (fakes.TxManager.Participants), not against a fake
+// that merely calls fn and returns, which would pass identically whether or
+// not the fix exists.
+func TestRegisterWithPasswordIsAtomic(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	boom := errors.New("boom")
+	h.users.SetPasswordHashErr = boom
+
+	if _, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Ana", "correct-horse"); !errors.Is(err, boom) {
+		t.Fatalf("RegisterWithPassword err = %v, want boom", err)
+	}
+	if _, err := h.users.GetByEmail(ctx, shared.EmailAddress("ana@test.com")); !errors.Is(err, fakes.ErrNotFound) {
+		t.Fatalf("Create survived a failed SetPasswordHash, GetByEmail err = %v, want ErrNotFound", err)
+	}
+
+	h.users.SetPasswordHashErr = nil
+	if _, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Ana", "correct-horse"); err != nil {
+		t.Fatalf("retry after rollback should succeed: %v", err)
+	}
+}
+
+// No verifier wired (GOOGLE_CLIENT_ID unset in production terms) must report
+// a distinct sentinel, not crash and not look like a rejected token.
+func TestSignInWithGoogleNotConfiguredReturnsSentinel(t *testing.T) {
+	h := newAuthHarness(t)
+	h.uc = NewAuth(h.users, h.sessions, h.tokens, h.mailer, nil, h.tx, h.clock, &fakes.IDGen{}, h.tokengen, h.hasher, authLoginURLBase, authSessionTTL)
+	if _, err := h.uc.SignInWithGoogle(context.Background(), "whatever"); !errors.Is(err, ErrGoogleNotConfigured) {
+		t.Fatalf("err = %v, want ErrGoogleNotConfigured", err)
+	}
+}
+
+// A JWKS outage and a forged token must not look alike: Verify's error has to
+// pass through unchanged, or an outage would be reported as an attack.
+func TestSignInWithGoogleReturnsVerifierErrorUnchanged(t *testing.T) {
+	h := newAuthHarness(t)
+	boom := errors.New("jwks fetch failed")
+	h.google.Err = boom
+	if _, err := h.uc.SignInWithGoogle(context.Background(), "whatever"); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want boom unchanged", err)
 	}
 }

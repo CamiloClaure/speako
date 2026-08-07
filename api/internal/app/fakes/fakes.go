@@ -30,6 +30,10 @@ type UserRepo struct {
 	byEmail      map[shared.EmailAddress]shared.ID
 	passwordHash map[shared.ID]string
 	Err          error
+	// SetPasswordHashErr fails only SetPasswordHash. Err fails every method,
+	// which cannot isolate "Create succeeds, SetPasswordHash fails" - exactly
+	// the case RegisterWithPassword's atomicity test needs to force.
+	SetPasswordHashErr error
 }
 
 func (r *UserRepo) init() {
@@ -99,9 +103,37 @@ func (r *UserRepo) SetPasswordHash(ctx context.Context, userID shared.ID, hash s
 	if r.Err != nil {
 		return r.Err
 	}
+	if r.SetPasswordHashErr != nil {
+		return r.SetPasswordHashErr
+	}
 	r.init()
 	r.passwordHash[userID] = hash
 	return nil
+}
+
+// snapshot captures byID, byEmail and passwordHash so TxManager can restore
+// them if the transaction's function fails partway through. It satisfies
+// Participant.
+func (r *UserRepo) snapshot() func() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byID := make(map[shared.ID]identity.User, len(r.byID))
+	for k, v := range r.byID {
+		byID[k] = v
+	}
+	byEmail := make(map[shared.EmailAddress]shared.ID, len(r.byEmail))
+	for k, v := range r.byEmail {
+		byEmail[k] = v
+	}
+	passwordHash := make(map[shared.ID]string, len(r.passwordHash))
+	for k, v := range r.passwordHash {
+		passwordHash[k] = v
+	}
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.byID, r.byEmail, r.passwordHash = byID, byEmail, passwordHash
+	}
 }
 
 // ProductRepo is an in-memory ProductRepo. Set Err to force every method to
@@ -833,15 +865,39 @@ func (g *TokenGen) NewToken() (string, string, error) {
 	return raw, hex.EncodeToString(sum[:]), nil
 }
 
-// TxManager runs the function immediately. Set Err to fail without running
-// the transaction body.
+// Participant is a fake repo whose writes TxManager can undo. snapshot
+// captures the repo's current state and returns a restore func; only fakes
+// actually exercised inside a transaction under test need to implement it.
+// A fake transaction that never rolls back is a fake that lies about what
+// InTx guarantees - see AGENTS.md.
+type Participant interface {
+	snapshot() func()
+}
+
+// TxManager runs the function immediately (there is only one fake
+// "connection", so nothing is truly isolated), but it earns the name
+// "transaction" by rolling every registered Participant back to its
+// pre-call state when fn returns an error - the same all-or-nothing
+// guarantee the real sqlite TxManager gives. Set Err to fail without running
+// fn at all. Wire in exactly the fakes the use case under test writes to.
 type TxManager struct {
-	Err error
+	Err          error
+	Participants []Participant
 }
 
 func (t *TxManager) InTx(ctx context.Context, fn func(context.Context) error) error {
 	if t.Err != nil {
 		return t.Err
 	}
-	return fn(ctx)
+	restores := make([]func(), len(t.Participants))
+	for i, p := range t.Participants {
+		restores[i] = p.snapshot()
+	}
+	if err := fn(ctx); err != nil {
+		for _, restore := range restores {
+			restore()
+		}
+		return err
+	}
+	return nil
 }

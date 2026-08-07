@@ -41,3 +41,26 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 	r.setSessionCookie(w, session.Token.String())
 	writeJSON(w, http.StatusOK, dto.Status{Status: "ok"})
 }
+
+// handleGoogleSignIn never treats the request body's claims as trusted -
+// SignInWithGoogle verifies the id_token itself and returns the identity the
+// token attests to; this handler only rejects the one thing it can check
+// without asking the use case: an empty token.
+func (r *Router) handleGoogleSignIn(w http.ResponseWriter, req *http.Request) {
+	var body dto.GoogleSignInRequest
+	if err := decodeJSON(req, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	if body.IDToken == "" {
+		writeError(w, validationErrorf("id_token is required"))
+		return
+	}
+	session, err := r.auth.SignInWithGoogle(req.Context(), body.IDToken)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	r.setSessionCookie(w, session.Token.String())
+	writeJSON(w, http.StatusOK, dto.Status{Status: "ok"})
+}

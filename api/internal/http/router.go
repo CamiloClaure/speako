@@ -99,6 +99,13 @@ func (r *Router) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/register", r.rateLimitLogin(r.handleRegister))
 	mux.HandleFunc("POST /api/v1/auth/login", r.rateLimitLogin(r.handleLogin))
 	mux.HandleFunc("POST /api/v1/auth/logout", r.handleLogout)
+	// ponytail: not behind rateLimitLogin - that limiter keys its bucket on the
+	// request body's `email` field (middleware.go:313-318), which a Google
+	// request never carries, so every Google attempt from one IP would
+	// collapse into one shared 5-per-15-minutes bucket unrelated to account
+	// guessing. Give this its own IP-only limiter if Google sign-in ever needs
+	// abuse protection.
+	mux.HandleFunc("POST /api/v1/auth/google", r.handleGoogleSignIn)
 
 	mux.HandleFunc("GET /api/v1/me", r.requireUser(r.handleMe))
 	mux.HandleFunc("GET /api/v1/me/credits", r.requireStudent(r.handleCredits))
