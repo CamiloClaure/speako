@@ -11,6 +11,7 @@ import (
 
 	"github.com/camiloclaure/speako/api/internal/app"
 	"github.com/camiloclaure/speako/api/internal/app/fakes"
+	"github.com/camiloclaure/speako/api/internal/domain/catalog"
 	"github.com/camiloclaure/speako/api/internal/domain/identity"
 	"github.com/camiloclaure/speako/api/internal/domain/scheduling"
 	"github.com/camiloclaure/speako/api/internal/domain/shared"
@@ -29,6 +30,7 @@ type testRig struct {
 	users        *fakes.UserRepo
 	availability *fakes.AvailabilityRepo
 	bookings     *fakes.BookingRepo
+	products     *fakes.ProductRepo
 }
 
 func newTestRig(t *testing.T) *testRig {
@@ -42,21 +44,25 @@ func newTestRig(t *testing.T) *testRig {
 	availability := &fakes.AvailabilityRepo{}
 	users := &fakes.UserRepo{}
 	bookings := &fakes.BookingRepo{}
+	// One shared repo, as main.go wires it: an admin-created product must be
+	// visible through the public catalogue in the same process, not just in
+	// production.
+	products := &fakes.ProductRepo{}
 
 	auth := app.NewAuth(
 		users, &fakes.SessionRepo{}, &fakes.LoginTokenRepo{},
 		mailer, nil, tx, clock, idgen, tokengen, &fakes.PasswordHasher{}, magicBase, 30*24*time.Hour,
 	)
-	catalog := app.NewCatalog(&fakes.ProductRepo{})
+	catalog := app.NewCatalog(products)
 	booking := app.NewBooking(&fakes.CreditLedgerRepo{}, bookings, availability, tx, clock, idgen, app.DefaultBookingPolicy())
 	purchase := app.NewPurchase(
-		&fakes.ProductRepo{}, &fakes.OrderRepo{}, &fakes.UserRepo{},
+		products, &fakes.OrderRepo{}, &fakes.UserRepo{},
 		&fakes.EntitlementRepo{}, &fakes.CreditLedgerRepo{}, &fakes.PaymentEventRepo{},
 		&fakes.PaymentGateway{}, mailer, tx, clock, idgen,
 	)
-	materials := app.NewMaterials(&fakes.ProductRepo{}, &fakes.EntitlementRepo{}, &fakes.FileStorage{})
+	materials := app.NewMaterials(products, &fakes.EntitlementRepo{}, &fakes.FileStorage{})
 	leads := app.NewLeads(&fakes.LeadRepo{}, mailer, clock, tokengen, "https://app.speako.test/leads/confirm?token=")
-	teacher := app.NewTeacher(&fakes.ProductRepo{}, &fakes.OrderRepo{}, bookings,
+	teacher := app.NewTeacher(products, &fakes.OrderRepo{}, bookings,
 		availability, &fakes.CreditLedgerRepo{}, users, tx, clock, idgen)
 
 	config := apihttp.Config{
@@ -65,7 +71,7 @@ func newTestRig(t *testing.T) *testRig {
 		SessionTTL:   30 * 24 * time.Hour,
 	}
 	mux := apihttp.NewRouter(auth, purchase, booking, materials, catalog, leads, teacher, config)
-	return &testRig{mux: mux, mailer: mailer, users: users, availability: availability, bookings: bookings}
+	return &testRig{mux: mux, mailer: mailer, users: users, availability: availability, bookings: bookings, products: products}
 }
 
 // signIn drives the full magic-link flow through the router and returns the
@@ -210,6 +216,7 @@ func TestAdminRoutesRejectAStudent(t *testing.T) {
 		"/api/v1/admin/availability",
 		"/api/v1/admin/bookings",
 		"/api/v1/admin/orders",
+		"/api/v1/admin/products",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.AddCookie(cookie)
@@ -234,6 +241,154 @@ func TestAdminRoutesRejectAnonymous(t *testing.T) {
 	rig.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+// GET /api/v1/admin/products is the teacher's product-management screen: it
+// must include products she has taken off sale (seeing what is off sale is
+// the point) and stay behind the same teacher-only gate as the rest of the
+// admin surface. Each case gets its own rig - signInAs reads the mailer's
+// first captured magic link, so sharing a rig across two sign-ins would
+// replay an already-consumed token.
+func TestAdminListProductsTeacherSeesActiveAndInactive(t *testing.T) {
+	rig := newTestRig(t)
+	active, err := catalog.NewProduct("p-active", "ativo", "Ativo", shared.NewMoney(1000), catalog.KindMaterial, "k", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inactive, err := catalog.NewProduct("p-inactive", "inativo", "Inativo", shared.NewMoney(1000), catalog.KindMaterial, "k", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inactive = inactive.Deactivate()
+	if err := rig.products.Create(context.Background(), active); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.products.Create(context.Background(), inactive); err != nil {
+		t.Fatal(err)
+	}
+
+	cookie := signInAs(t, rig, "teacher@test.com", identity.RoleTeacher)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var body dto.ProductList
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if len(body.Products) != 2 {
+		t.Fatalf("got %d products, want 2 (active and inactive); body=%s", len(body.Products), rr.Body.String())
+	}
+	sawInactive := false
+	for _, p := range body.Products {
+		if p.Slug == "inativo" {
+			sawInactive = true
+			if p.Active {
+				t.Errorf("product %q reported active=true, want false", p.Slug)
+			}
+		}
+	}
+	if !sawInactive {
+		t.Fatalf("inactive product missing from admin list: %+v", body.Products)
+	}
+}
+
+func TestAdminListProductsRejectsAStudent(t *testing.T) {
+	rig := newTestRig(t)
+	cookie := signIn(t, rig)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAdminListProductsRejectsAnonymous(t *testing.T) {
+	rig := newTestRig(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products", nil)
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// POST /api/v1/admin/products with only the required fields: no id (the
+// server mints one), no slug (derived from title) and no active (defaults to
+// true). The created product must then show up in the public catalogue,
+// proving the whole chain - mint, derive, default - actually works end to
+// end and not just against the admin repo.
+func TestAdminCreateProductMintsIDDerivesSlugAndDefaultsActive(t *testing.T) {
+	rig := newTestRig(t)
+	cookie := signInAs(t, rig, "teacher@test.com", identity.RoleTeacher)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/products", strings.NewReader(
+		`{"title":"Pacote de 8 Aulas — Conversação","kind":"pack","price_cents":39900,"credits":8,"validity_days":90}`))
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	pubReq := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
+	pubRR := httptest.NewRecorder()
+	rig.mux.ServeHTTP(pubRR, pubReq)
+	if pubRR.Code != http.StatusOK {
+		t.Fatalf("public list status = %d, want 200; body=%s", pubRR.Code, pubRR.Body.String())
+	}
+	var list dto.ProductList
+	if err := json.Unmarshal(pubRR.Body.Bytes(), &list); err != nil {
+		t.Fatalf("unmarshal public list: %v", err)
+	}
+	if len(list.Products) != 1 {
+		t.Fatalf("public product list has %d products, want 1; body=%s", len(list.Products), pubRR.Body.String())
+	}
+	got := list.Products[0]
+	if got.ID == "" {
+		t.Error("created product has no ID - the server was supposed to mint one")
+	}
+	if got.Slug != "pacote-de-8-aulas-conversacao" {
+		t.Errorf("slug = %q, want %q", got.Slug, "pacote-de-8-aulas-conversacao")
+	}
+	if !got.Active {
+		t.Error("a product created without an active field must default to active")
+	}
+}
+
+// A pack created without credits must fail with a message that names the
+// missing field - a teacher who cannot tell which field to fix cannot use
+// the form.
+func TestAdminCreateProductMissingCreditsNamesTheField(t *testing.T) {
+	rig := newTestRig(t)
+	cookie := signInAs(t, rig, "teacher@test.com", identity.RoleTeacher)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/products", strings.NewReader(
+		`{"title":"Pacote Sem Créditos","kind":"pack","price_cents":1000}`))
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	rig.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", rr.Code, rr.Body.String())
+	}
+	var envelope dto.ErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if envelope.Error.Code != "validation_failed" {
+		t.Errorf("code = %q, want validation_failed", envelope.Error.Code)
+	}
+	if !strings.Contains(envelope.Error.Message, "credits") {
+		t.Errorf("message = %q, does not name the missing field %q", envelope.Error.Message, "credits")
 	}
 }
 

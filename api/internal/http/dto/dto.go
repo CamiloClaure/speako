@@ -183,6 +183,11 @@ type AdminBookingList struct {
 
 // AdminProductInput creates or updates a product. The price arrives as integer
 // cents; converting from reais is the client's job and is tested there.
+// ID and Slug are both optional: an omitted ID means "create", a supplied one
+// means "update that product"; an omitted Slug is derived from Title.
+// Active is a pointer, not a bool, so an omitted field is distinguishable
+// from an explicit false - a plain bool would decode a missing field as
+// false and silently create the product deactivated. Nil means active.
 type AdminProductInput struct {
 	ID           string `json:"id"`
 	Slug         string `json:"slug"`
@@ -192,5 +197,5 @@ type AdminProductInput struct {
 	FileKey      string `json:"file_key"`
 	Credits      int    `json:"credits"`
 	ValidityDays int    `json:"validity_days"`
-	Active       bool   `json:"active"`
+	Active       *bool  `json:"active"`
 }

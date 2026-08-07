@@ -75,12 +75,74 @@ func TestNewProductRejects(t *testing.T) {
 	}
 }
 
+// A teacher who cannot tell which field is wrong cannot fix her form, so
+// NewProduct must return a sentinel distinguishable by field, not just the
+// generic ErrInvalidProduct family.
+func TestNewProductRejectsNamesTheField(t *testing.T) {
+	tests := []struct {
+		name string
+		p    Product
+		want error
+	}{
+		{"missing id", Product{Slug: "s", Title: "T", Price: shared.NewMoney(100), Kind: KindMaterial, FileKey: "k"}, ErrProductMissingID},
+		{"missing slug", Product{ID: "p1", Title: "T", Price: shared.NewMoney(100), Kind: KindMaterial, FileKey: "k"}, ErrProductMissingSlug},
+		{"invalid price", Product{ID: "p1", Slug: "s", Title: "T", Price: shared.NewMoney(0), Kind: KindMaterial, FileKey: "k"}, ErrProductInvalidPrice},
+		{"missing file key", Product{ID: "p1", Slug: "s", Title: "T", Price: shared.NewMoney(100), Kind: KindMaterial}, ErrProductMissingFileKey},
+		{"invalid credits", Product{ID: "p1", Slug: "s", Title: "T", Price: shared.NewMoney(100), Kind: KindPack}, ErrProductInvalidCredits},
+		{"invalid kind", Product{ID: "p1", Slug: "s", Title: "T", Price: shared.NewMoney(100), Kind: Kind("subscription")}, ErrProductInvalidKind},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewProduct(tt.p.ID, tt.p.Slug, tt.p.Title, tt.p.Price, tt.p.Kind, tt.p.FileKey, tt.p.Credits, tt.p.ValidityDays)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("NewProduct error = %v, want %v", err, tt.want)
+			}
+			if !errors.Is(err, ErrInvalidProduct) {
+				t.Fatalf("NewProduct error %v does not also satisfy the ErrInvalidProduct family", err)
+			}
+		})
+	}
+}
+
 func TestKindPredicates(t *testing.T) {
 	if !KindMaterial.IsMaterial() || KindMaterial.IsPack() {
 		t.Fatal("KindMaterial must be material and not pack")
 	}
 	if !KindPack.IsPack() || KindPack.IsMaterial() {
 		t.Fatal("KindPack must be pack and not material")
+	}
+}
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		name    string
+		title   string
+		want    string
+		wantErr bool
+	}{
+		{"simple", "Ebook Iniciante", "ebook-iniciante", false},
+		{"pt-BR accents and em dash", "Pacote de 8 Aulas — Conversação", "pacote-de-8-aulas-conversacao", false},
+		{"cedilla and tilde", "Lição de Conversação com Situações do Dia a Dia", "licao-de-conversacao-com-situacoes-do-dia-a-dia", false},
+		{"leading and trailing punctuation", "  -- Guia Prático! --  ", "guia-pratico", false},
+		{"collapses repeated separators", "Pacote   4   Aulas///Premium", "pacote-4-aulas-premium", false},
+		{"all punctuation fails instead of producing an empty slug", "--- !!! ---", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Slugify(tt.title)
+			if tt.wantErr {
+				if !errors.Is(err, ErrEmptySlug) {
+					t.Fatalf("Slugify(%q) err = %v, want ErrEmptySlug", tt.title, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Slugify(%q): %v", tt.title, err)
+			}
+			if got != tt.want {
+				t.Fatalf("Slugify(%q) = %q, want %q", tt.title, got, tt.want)
+			}
+		})
 	}
 }
 

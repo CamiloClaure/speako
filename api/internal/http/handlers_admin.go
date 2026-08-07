@@ -122,20 +122,60 @@ func (r *Router) handleAdminOrders(w http.ResponseWriter, req *http.Request, _ i
 	writeJSON(w, http.StatusOK, dto.OrderList{Orders: out})
 }
 
+// handleAdminListProducts returns every product, active or not - the
+// public catalogue only shows what is on sale, but the teacher's screen
+// needs to show what she took off sale too.
+func (r *Router) handleAdminListProducts(w http.ResponseWriter, req *http.Request, _ identity.User) {
+	products, err := r.teacher.ListProducts(req.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	out := make([]dto.Product, 0, len(products))
+	for _, p := range products {
+		out = append(out, toProductDTO(p))
+	}
+	writeJSON(w, http.StatusOK, dto.ProductList{Products: out})
+}
+
 func (r *Router) handleAdminCreateProduct(w http.ResponseWriter, req *http.Request, _ identity.User) {
 	var body dto.AdminProductInput
 	if err := decodeJSON(req, &body); err != nil {
 		writeError(w, err)
 		return
 	}
+
+	// The client never has to invent a primary key: mint one when it omits
+	// id, the same way a supplied id means "update that product".
+	id := shared.ID(body.ID)
+	if id.IsZero() {
+		id = r.teacher.NewProductID()
+	}
+
+	// A slug is derived from the title when the client omits one - deriving
+	// it is a business rule, so it lives in the catalog domain, not here.
+	slug := body.Slug
+	if slug == "" {
+		derived, err := catalog.Slugify(body.Title)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		slug = derived
+	}
+
 	product, err := catalog.NewProduct(
-		shared.ID(body.ID), body.Slug, body.Title, shared.NewMoney(body.PriceCents),
+		id, slug, body.Title, shared.NewMoney(body.PriceCents),
 		catalog.Kind(body.Kind), body.FileKey, body.Credits, body.ValidityDays)
 	if err != nil {
-		writeError(w, validationErrorf("produto inválido: verifique preço, tipo e créditos"))
+		// err already names the one field that was wrong (see the
+		// catalog.ErrProduct* sentinels) - no re-validation here.
+		writeError(w, err)
 		return
 	}
-	if !body.Active {
+	// Active omitted means active: a plain bool would decode a missing
+	// field as false and silently create the product deactivated.
+	if body.Active != nil && !*body.Active {
 		product = product.Deactivate()
 	}
 	if err := r.teacher.UpsertProduct(req.Context(), product); err != nil {

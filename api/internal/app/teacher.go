@@ -130,6 +130,22 @@ func (uc *Teacher) CancelBookingAsTeacher(ctx context.Context, bookingID shared.
 	})
 }
 
+// NewProductID mints a fresh product ID. The admin "create product" handler
+// calls this when the request omits one - catalog.NewProduct refuses a zero
+// ID, so the server has to supply it rather than trust the client to invent
+// a primary key.
+func (uc *Teacher) NewProductID() shared.ID {
+	return uc.idgen.NewID()
+}
+
+// ListProducts returns every product regardless of Active, so the teacher's
+// screen can show what is off sale as well as what is on it. Unlike
+// Catalog.ListProducts, this is not filtered - the point of the admin view
+// is seeing everything.
+func (uc *Teacher) ListProducts(ctx context.Context) ([]catalog.Product, error) {
+	return uc.products.List(ctx)
+}
+
 // UpsertProduct creates the product or, when one with the same slug already
 // exists, updates it in place so references to the old ID keep working.
 func (uc *Teacher) UpsertProduct(ctx context.Context, p catalog.Product) error {

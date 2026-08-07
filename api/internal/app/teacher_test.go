@@ -200,6 +200,52 @@ func TestUpsertProductCreatesThenUpdates(t *testing.T) {
 	}
 }
 
+// The admin "create product" handler mints an ID through this rather than
+// trusting the client to invent one - NewProductID has to actually reach the
+// IDGen port, not just return a zero value.
+func TestNewProductIDUsesIDGen(t *testing.T) {
+	h := newTeacherHarness(t)
+	got := h.uc.NewProductID()
+	if got == "" {
+		t.Fatal("NewProductID returned an empty ID")
+	}
+	if got != shared.ID("00000000-0000-4000-8000-000000000001") {
+		t.Fatalf("NewProductID = %q, want the fake IDGen's first ID", got)
+	}
+}
+
+// ListProducts is the admin read path: unlike Catalog.ListProducts, it must
+// not filter out a deactivated product - seeing what is off sale is the
+// point of the teacher's screen.
+func TestListProductsIncludesInactive(t *testing.T) {
+	h := newTeacherHarness(t)
+	ctx := context.Background()
+
+	active, err := catalog.NewProduct("p1", "ativo", "Ativo", shared.NewMoney(1000), catalog.KindMaterial, "k", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inactive, err := catalog.NewProduct("p2", "inativo", "Inativo", shared.NewMoney(1000), catalog.KindMaterial, "k", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inactive = inactive.Deactivate()
+	if err := h.products.Create(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.products.Create(ctx, inactive); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := h.uc.ListProducts(ctx)
+	if err != nil {
+		t.Fatalf("ListProducts: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListProducts returned %d products, want 2 (active and inactive); got %+v", len(got), got)
+	}
+}
+
 // A double-clicked Cancel button must not hand out two credits for one lesson.
 func TestCancelBookingAsTeacherRefundsOnlyOnce(t *testing.T) {
 	h := newTeacherHarness(t)

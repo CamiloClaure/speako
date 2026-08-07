@@ -127,6 +127,7 @@ func (r *Router) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/admin/bookings/{id}/status", r.requireTeacher(r.handleAdminBookingStatus))
 	mux.HandleFunc("DELETE /api/v1/admin/bookings/{id}", r.requireTeacher(r.handleAdminCancelBooking))
 	mux.HandleFunc("GET /api/v1/admin/orders", r.requireTeacher(r.handleAdminOrders))
+	mux.HandleFunc("GET /api/v1/admin/products", r.requireTeacher(r.handleAdminListProducts))
 	mux.HandleFunc("POST /api/v1/admin/products", r.requireTeacher(r.handleAdminCreateProduct))
 }
 
