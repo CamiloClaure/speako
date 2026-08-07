@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/camiloclaure/speako/api/internal/adapters/devstub"
+	"github.com/camiloclaure/speako/api/internal/adapters/password"
 	"github.com/camiloclaure/speako/api/internal/adapters/sqlite"
 	"github.com/camiloclaure/speako/api/internal/adapters/system"
 	"github.com/camiloclaure/speako/api/internal/app"
@@ -72,6 +73,7 @@ func run(ctx context.Context) error {
 	clock := system.Clock{}
 	idgen := system.IDGen{}
 	tokengen := system.TokenGen{}
+	hasher := password.Bcrypt{}
 
 	mailer, payments, files, err := externals(cfg)
 	if err != nil {
@@ -79,7 +81,7 @@ func run(ctx context.Context) error {
 	}
 
 	// Use cases.
-	auth := app.NewAuth(users, sessions, loginTokens, mailer, clock, idgen, tokengen,
+	auth := app.NewAuth(users, sessions, loginTokens, mailer, clock, idgen, tokengen, hasher,
 		cfg.PublicURL+"/entrar?token=", cfg.SessionTTL)
 	purchase := app.NewPurchase(products, orders, users, entitlements, ledger, events,
 		payments, mailer, tx, clock, idgen)

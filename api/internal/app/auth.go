@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/camiloclaure/speako/api/internal/app/ports"
@@ -14,6 +15,18 @@ import (
 // ErrSessionExpired reports a session whose lifetime has ended; the caller
 // must ask the student to sign in again.
 var ErrSessionExpired = errors.New("session expired")
+
+var (
+	// ErrInvalidCredentials is what SignInWithPassword returns for every way
+	// a password sign-in can fail: unknown email, an account with no
+	// password set, or a wrong password. Returning anything else for any one
+	// of those three would tell a caller which case it hit - see
+	// SignInWithPassword's doc comment.
+	ErrInvalidCredentials = shared.NewDomainError("auth.invalid_credentials", "invalid credentials")
+	// ErrEmailTaken is returned by RegisterWithPassword when the email
+	// already has an account.
+	ErrEmailTaken = shared.NewDomainError("auth.email_taken", "email already registered")
+)
 
 // magicLinkTTL is how long a magic link stays redeemable.
 const magicLinkTTL = 15 * time.Minute
@@ -32,8 +45,36 @@ type Auth struct {
 	clock        ports.Clock
 	idgen        ports.IDGen
 	tokengen     ports.TokenGen
+	hasher       ports.PasswordHasher
 	loginURLBase string
 	sessionTTL   time.Duration
+}
+
+// dummyPasswordHash is a bcrypt hash of an arbitrary, never-issued password.
+// SignInWithPassword compares against it whenever there is no real hash to
+// compare against (unknown email, or an account with no password set), so
+// that case costs the same wall-clock time as a wrong-password attempt on a
+// real account. Without it, timing alone would tell an attacker which emails
+// have accounts. It is computed lazily from whichever Auth calls it first:
+// every PasswordHasher implementation hashes the same fixed input to the
+// same output, so it does not matter which instance wins the race, and it
+// only has to happen once per process.
+var (
+	dummyPasswordHash     string
+	dummyPasswordHashOnce sync.Once
+)
+
+const dummyPassword = "speako-dummy-password-for-timing-safety"
+
+// getDummyHash returns dummyPasswordHash, computing it on the first call.
+func (uc *Auth) getDummyHash() string {
+	dummyPasswordHashOnce.Do(func() {
+		// Hash only fails if the system entropy source fails; falling back to
+		// "" still makes Matches do a real (failing) comparison rather than
+		// skip it, so the timing guarantee holds either way.
+		dummyPasswordHash, _ = uc.hasher.Hash(dummyPassword)
+	})
+	return dummyPasswordHash
 }
 
 // NewAuth wires the authentication use cases to their ports.
@@ -45,6 +86,7 @@ func NewAuth(
 	clock ports.Clock,
 	idgen ports.IDGen,
 	tokengen ports.TokenGen,
+	hasher ports.PasswordHasher,
 	loginURLBase string,
 	sessionTTL time.Duration,
 ) *Auth {
@@ -56,6 +98,7 @@ func NewAuth(
 		clock:        clock,
 		idgen:        idgen,
 		tokengen:     tokengen,
+		hasher:       hasher,
 		loginURLBase: loginURLBase,
 		sessionTTL:   sessionTTL,
 	}
@@ -132,6 +175,98 @@ func (uc *Auth) SignInWithGoogle(ctx context.Context, rawEmail, name string) (id
 		return identity.Session{}, err
 	}
 	return uc.mintSession(ctx, user)
+}
+
+// RegisterWithPassword creates a student account with a password and signs
+// it in. The email must not already have an account - unlike the magic link
+// and Google flows, which treat "first time we see this address" as sign-up,
+// a password account is created explicitly, once, on purpose.
+func (uc *Auth) RegisterWithPassword(ctx context.Context, rawEmail, name, password string) (identity.Session, error) {
+	email, err := shared.ParseEmail(rawEmail)
+	if err != nil {
+		return identity.Session{}, err
+	}
+	if err := identity.ValidatePassword(password); err != nil {
+		return identity.Session{}, err
+	}
+	if _, err := uc.users.GetByEmail(ctx, email); err == nil {
+		return identity.Session{}, ErrEmailTaken
+	} else if !errors.Is(err, ports.ErrNotFound) {
+		return identity.Session{}, err
+	}
+	user, err := identity.NewUser(uc.idgen.NewID(), email, name, identity.RoleStudent, studentTimezone)
+	if err != nil {
+		return identity.Session{}, err
+	}
+	if err := uc.users.Create(ctx, user); err != nil {
+		return identity.Session{}, err
+	}
+	hash, err := uc.hasher.Hash(password)
+	if err != nil {
+		return identity.Session{}, err
+	}
+	if err := uc.users.SetPasswordHash(ctx, user.ID, hash); err != nil {
+		return identity.Session{}, err
+	}
+	return uc.mintSession(ctx, user)
+}
+
+// SignInWithPassword checks an email and password and mints a session.
+//
+// It returns the exact same ErrInvalidCredentials for three different
+// situations: the email has no account, the account has no password set (it
+// is magic-link-only), and the account has a password but it does not match.
+// Any other response shape - a different error, a different status code, a
+// body that differs by even one byte - would let a caller distinguish which
+// case occurred, which means it could enumerate which emails have accounts,
+// or that a specific account is magic-link-only.
+//
+// It also resists a timing attack: when there is no real hash to compare
+// against, it still runs one Matches call against a fixed dummy hash
+// (getDummyHash), so that branch costs the same wall-clock time as comparing
+// against a real, wrong password.
+func (uc *Auth) SignInWithPassword(ctx context.Context, rawEmail, password string) (identity.Session, error) {
+	email, err := shared.ParseEmail(rawEmail)
+	if err != nil {
+		return identity.Session{}, err
+	}
+	user, err := uc.users.GetByEmail(ctx, email)
+	if errors.Is(err, ports.ErrNotFound) {
+		uc.hasher.Matches(uc.getDummyHash(), password)
+		return identity.Session{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		// A real storage failure, not "no such account" - it must surface,
+		// never collapse into ErrInvalidCredentials.
+		return identity.Session{}, err
+	}
+	hash, err := uc.users.GetPasswordHash(ctx, user.ID)
+	if err != nil {
+		return identity.Session{}, err
+	}
+	if hash == "" {
+		// Magic-link-only account: still pay for a comparison so this case
+		// costs the same as a wrong password on a real hash.
+		hash = uc.getDummyHash()
+	}
+	if !uc.hasher.Matches(hash, password) {
+		return identity.Session{}, ErrInvalidCredentials
+	}
+	return uc.mintSession(ctx, user)
+}
+
+// SetPassword validates and stores a new password hash for userID, without
+// touching the account's other fields. Used by the CLI to set (or reset) a
+// student's password.
+func (uc *Auth) SetPassword(ctx context.Context, userID shared.ID, password string) error {
+	if err := identity.ValidatePassword(password); err != nil {
+		return err
+	}
+	hash, err := uc.hasher.Hash(password)
+	if err != nil {
+		return err
+	}
+	return uc.users.SetPasswordHash(ctx, userID, hash)
 }
 
 // SignOut deletes the session behind the cookie value.

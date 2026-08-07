@@ -25,6 +25,10 @@ var errForbidden = errors.New("esta área é restrita à professora")
 // cannot serve yet.
 var errNotImplemented = errors.New("not implemented")
 
+// errRateLimited marks a request over the login rate limit. Transport-level,
+// like errUnauthenticated; maps to 429 in errors.go.
+var errRateLimited = errors.New("too many attempts, try again later")
+
 const maxBodyBytes = 1 << 20
 
 // Config is the transport configuration the router needs. Values that never
@@ -45,6 +49,8 @@ type Router struct {
 	leads     *app.Leads
 	teacher   *app.Teacher
 	config    Config
+
+	loginLimiter *loginLimiter
 }
 
 // NewRouter builds the full HTTP stack: the route table wrapped in the
@@ -68,6 +74,8 @@ func NewRouter(
 		leads:     leads,
 		teacher:   teacher,
 		config:    config,
+
+		loginLimiter: newLoginLimiter(),
 	}
 	routes := http.NewServeMux()
 	r.register(routes)
@@ -86,8 +94,10 @@ func (r *Router) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/leads", r.handleCaptureLead)
 	mux.HandleFunc("GET /api/v1/leads/confirm", r.handleConfirmLead)
 
-	mux.HandleFunc("POST /api/v1/auth/magic-link", r.handleRequestMagicLink)
+	mux.HandleFunc("POST /api/v1/auth/magic-link", r.rateLimitLogin(r.handleRequestMagicLink))
 	mux.HandleFunc("POST /api/v1/auth/magic-link/verify", r.handleVerifyMagicLink)
+	mux.HandleFunc("POST /api/v1/auth/register", r.rateLimitLogin(r.handleRegister))
+	mux.HandleFunc("POST /api/v1/auth/login", r.rateLimitLogin(r.handleLogin))
 	mux.HandleFunc("POST /api/v1/auth/logout", r.handleLogout)
 
 	mux.HandleFunc("GET /api/v1/me", r.requireUser(r.handleMe))

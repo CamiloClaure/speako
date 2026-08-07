@@ -24,6 +24,7 @@ type authHarness struct {
 	sessions *fakes.SessionRepo
 	tokens   *fakes.LoginTokenRepo
 	tokengen *fakes.TokenGen
+	hasher   *fakes.PasswordHasher
 	mailer   *fakes.Mailer
 	clock    *fakes.Clock
 }
@@ -35,10 +36,11 @@ func newAuthHarness(t *testing.T) authHarness {
 		sessions: &fakes.SessionRepo{},
 		tokens:   &fakes.LoginTokenRepo{},
 		tokengen: &fakes.TokenGen{},
+		hasher:   &fakes.PasswordHasher{},
 		mailer:   &fakes.Mailer{},
 		clock:    &fakes.Clock{NowTime: time.Date(2026, time.January, 2, 12, 0, 0, 0, time.UTC)},
 	}
-	h.uc = NewAuth(h.users, h.sessions, h.tokens, h.mailer, h.clock, &fakes.IDGen{}, h.tokengen, authLoginURLBase, authSessionTTL)
+	h.uc = NewAuth(h.users, h.sessions, h.tokens, h.mailer, h.clock, &fakes.IDGen{}, h.tokengen, h.hasher, authLoginURLBase, authSessionTTL)
 	return h
 }
 
@@ -222,5 +224,142 @@ func TestSignInWithGoogleDoesNotCreateUserOnStorageFailure(t *testing.T) {
 	}
 	if len(h.sessions.Deleted) != 0 {
 		t.Fatalf("unexpected session activity: %v", h.sessions.Deleted)
+	}
+}
+
+func TestRegisterThenSignInWithPasswordSucceeds(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+
+	regSess, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Ana", "correct-horse")
+	if err != nil {
+		t.Fatalf("RegisterWithPassword: %v", err)
+	}
+	if _, err := h.uc.GetMe(ctx, regSess.Token.String()); err != nil {
+		t.Fatalf("fresh session from register should resolve: %v", err)
+	}
+
+	signInSess, err := h.uc.SignInWithPassword(ctx, "ana@test.com", "correct-horse")
+	if err != nil {
+		t.Fatalf("SignInWithPassword with the right password: %v", err)
+	}
+	if _, err := h.uc.GetMe(ctx, signInSess.Token.String()); err != nil {
+		t.Fatalf("session from sign-in should resolve: %v", err)
+	}
+}
+
+func TestSignInWithPasswordWrongPasswordFails(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	if _, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Ana", "correct-horse"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.uc.SignInWithPassword(ctx, "ana@test.com", "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong password err = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// The whole point of ErrInvalidCredentials is that a caller cannot tell "no
+// such account" from "wrong password" apart - not by error identity, and not
+// by the error text either.
+func TestSignInWithPasswordUnknownEmailReturnsSameErrorAsWrongPassword(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	if _, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Ana", "correct-horse"); err != nil {
+		t.Fatal(err)
+	}
+	_, unknownErr := h.uc.SignInWithPassword(ctx, "nobody@test.com", "whatever123")
+	_, wrongErr := h.uc.SignInWithPassword(ctx, "ana@test.com", "wrong-password")
+	if !errors.Is(unknownErr, ErrInvalidCredentials) {
+		t.Fatalf("unknown email err = %v, want ErrInvalidCredentials", unknownErr)
+	}
+	if !errors.Is(wrongErr, ErrInvalidCredentials) {
+		t.Fatalf("wrong password err = %v, want ErrInvalidCredentials", wrongErr)
+	}
+	if unknownErr.Error() != wrongErr.Error() {
+		t.Fatalf("error text differs: unknown=%q wrong=%q - a caller could tell the two cases apart",
+			unknownErr.Error(), wrongErr.Error())
+	}
+}
+
+// A login attempt against an unknown email must still pay for one bcrypt
+// comparison, or the missing comparison is itself a timing tell. This cannot
+// assert on wall-clock time without being flaky, so it asserts on the thing
+// that actually causes the constant cost: Matches was called.
+func TestSignInWithPasswordPaysForAComparisonOnUnknownEmail(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	if _, err := h.uc.SignInWithPassword(ctx, "nobody@test.com", "whatever123"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatal(err)
+	}
+	if h.hasher.MatchesCalls != 1 {
+		t.Fatalf("Matches called %d times for an unknown email, want 1 - an absent account must cost what a real one does",
+			h.hasher.MatchesCalls)
+	}
+}
+
+func TestRegisterWithPasswordRejectsShortPassword(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	if _, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Ana", "short12"); !errors.Is(err, identity.ErrWeakPassword) {
+		t.Fatalf("7-char password err = %v, want ErrWeakPassword", err)
+	}
+	if _, err := h.users.GetByEmail(ctx, shared.EmailAddress("ana@test.com")); !errors.Is(err, fakes.ErrNotFound) {
+		t.Fatalf("a rejected registration must not create an account, GetByEmail err = %v", err)
+	}
+}
+
+func TestRegisterWithPasswordRejectsExistingEmailWithoutOverwritingPassword(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	if _, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Ana", "first-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.uc.RegisterWithPassword(ctx, "ana@test.com", "Someone Else", "second-password"); !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("re-registration err = %v, want ErrEmailTaken", err)
+	}
+	if _, err := h.uc.SignInWithPassword(ctx, "ana@test.com", "first-password"); err != nil {
+		t.Fatalf("the original password should still sign in: %v", err)
+	}
+	if _, err := h.uc.SignInWithPassword(ctx, "ana@test.com", "second-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("the second password must not have been stored, err = %v", err)
+	}
+}
+
+// An account created through the magic link (or Google) has no password at
+// all - password_hash is "". SignInWithPassword must refuse every password
+// for it, not just fail to find a match.
+func TestSignInWithPasswordRejectsMagicLinkOnlyAccount(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	if _, err := h.uc.SignInWithGoogle(ctx, "ana@test.com", "Ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.uc.SignInWithPassword(ctx, "ana@test.com", "anything12"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("magic-link-only account err = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// SetPassword is the CLI's entry point for giving a magic-link-only account
+// a password (or resetting one). It goes through the same validation and
+// storage as registration.
+func TestSetPasswordThenSignIn(t *testing.T) {
+	h := newAuthHarness(t)
+	ctx := context.Background()
+	if _, err := h.uc.SignInWithGoogle(ctx, "ana@test.com", "Ana"); err != nil {
+		t.Fatal(err)
+	}
+	user, err := h.users.GetByEmail(ctx, shared.EmailAddress("ana@test.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.uc.SetPassword(ctx, user.ID, "brand-new-password"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if _, err := h.uc.SignInWithPassword(ctx, "ana@test.com", "brand-new-password"); err != nil {
+		t.Fatalf("SignInWithPassword after SetPassword: %v", err)
+	}
+	if err := h.uc.SetPassword(ctx, user.ID, "short"); !errors.Is(err, identity.ErrWeakPassword) {
+		t.Fatalf("SetPassword with a short password err = %v, want ErrWeakPassword", err)
 	}
 }

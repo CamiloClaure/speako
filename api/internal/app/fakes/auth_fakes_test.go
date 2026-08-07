@@ -15,6 +15,7 @@ import (
 var (
 	_ ports.SessionRepo    = (*SessionRepo)(nil)
 	_ ports.LoginTokenRepo = (*LoginTokenRepo)(nil)
+	_ ports.PasswordHasher = (*PasswordHasher)(nil)
 )
 
 func testEmail(t *testing.T) shared.EmailAddress {

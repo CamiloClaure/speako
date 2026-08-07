@@ -135,6 +135,35 @@ func (r *LoginTokenRepo) DeleteExpired(ctx context.Context, before time.Time) er
 	return nil
 }
 
+// PasswordHasher is a fast fake of ports.PasswordHasher: Hash just tags the
+// plaintext and Matches checks the tag. It is not a real hash - it exists so
+// Auth use case tests do not pay for real bcrypt on every run. Set Err to
+// force Hash to fail. MatchesCalls counts calls to Matches, so a test can
+// prove a comparison happened without measuring wall-clock time.
+type PasswordHasher struct {
+	mu           sync.Mutex
+	Err          error
+	MatchesCalls int
+}
+
+const fakeHashTag = "fake-hash:"
+
+func (h *PasswordHasher) Hash(plain string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.Err != nil {
+		return "", h.Err
+	}
+	return fakeHashTag + plain, nil
+}
+
+func (h *PasswordHasher) Matches(hash, plain string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.MatchesCalls++
+	return hash == fakeHashTag+plain
+}
+
 // PaymentEventRepo is an in-memory PaymentEventRepo. Claim is a real claim:
 // only the first caller for an eventID gets true, which is what a test needs
 // to prove a redelivered webhook grants nothing twice.

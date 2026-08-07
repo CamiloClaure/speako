@@ -13,6 +13,20 @@ var (
 	ErrInvalidTimezone = shared.NewDomainError("user.timezone", "invalid timezone")
 	ErrEmptyName       = shared.NewDomainError("user.name", "name must not be empty")
 	ErrInvalidToken    = shared.NewDomainError("session.token", "invalid session token")
+	ErrWeakPassword    = shared.NewDomainError("password.weak", "password must be at least 8 characters")
+	ErrPasswordTooLong = shared.NewDomainError("password.too_long", "password must be at most 72 bytes")
+)
+
+// Password length bounds. No character-composition requirements - those reject
+// legitimate passwords more often than they stop weak ones.
+//
+// The maximum is not a preference: bcrypt refuses any input over 72 bytes, so
+// a longer passphrase cannot be hashed at all. Rejecting it here turns what
+// would otherwise be a 500 into a message the person can act on. Note it is
+// bytes, not characters - "senha" with accents costs more than five.
+const (
+	minPasswordLength = 8
+	maxPasswordLength = 72
 )
 
 // Role is the user's access level. Values are English in code, pt-BR in UI.
@@ -78,6 +92,20 @@ func NewUser(id shared.ID, email shared.EmailAddress, name string, role Role, ti
 func (u User) Location() *time.Location {
 	loc, _ := time.LoadLocation(u.Timezone)
 	return loc
+}
+
+// ValidatePassword enforces the length floor on a plaintext password before
+// it is hashed. The hash itself never lives on User: it is stored and read
+// through the UserRepo port so a careless handler cannot serialize it into a
+// response.
+func ValidatePassword(plain string) error {
+	if len(plain) < minPasswordLength {
+		return ErrWeakPassword
+	}
+	if len(plain) > maxPasswordLength {
+		return ErrPasswordTooLong
+	}
+	return nil
 }
 
 // Session is a value that carries who a token belongs to and when it dies.

@@ -25,16 +25,18 @@ var ErrNotFound = fmt.Errorf("fakes: %w", ports.ErrNotFound)
 
 // UserRepo is an in-memory UserRepo. Set Err to force every method to fail.
 type UserRepo struct {
-	mu      sync.Mutex
-	byID    map[shared.ID]identity.User
-	byEmail map[shared.EmailAddress]shared.ID
-	Err     error
+	mu           sync.Mutex
+	byID         map[shared.ID]identity.User
+	byEmail      map[shared.EmailAddress]shared.ID
+	passwordHash map[shared.ID]string
+	Err          error
 }
 
 func (r *UserRepo) init() {
 	if r.byID == nil {
 		r.byID = map[shared.ID]identity.User{}
 		r.byEmail = map[shared.EmailAddress]shared.ID{}
+		r.passwordHash = map[shared.ID]string{}
 	}
 }
 
@@ -74,6 +76,32 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email shared.EmailAddress) (i
 		return identity.User{}, ErrNotFound
 	}
 	return r.byID[id], nil
+}
+
+// GetPasswordHash returns an empty string for a user with no password set,
+// matching the SQLite adapter's NOT NULL DEFAULT empty-string column.
+func (r *UserRepo) GetPasswordHash(ctx context.Context, userID shared.ID) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Err != nil {
+		return "", r.Err
+	}
+	r.init()
+	if _, ok := r.byID[userID]; !ok {
+		return "", ErrNotFound
+	}
+	return r.passwordHash[userID], nil
+}
+
+func (r *UserRepo) SetPasswordHash(ctx context.Context, userID shared.ID, hash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Err != nil {
+		return r.Err
+	}
+	r.init()
+	r.passwordHash[userID] = hash
+	return nil
 }
 
 // ProductRepo is an in-memory ProductRepo. Set Err to force every method to

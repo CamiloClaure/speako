@@ -2,6 +2,7 @@ package identity
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +113,34 @@ func TestSessionExpiry(t *testing.T) {
 			}
 			if got := s.IsValid(tt.now); got == tt.want && tt.want {
 				t.Fatalf("IsValid() should not be true when expired, got %v", got)
+			}
+		})
+	}
+}
+
+func TestValidatePassword(t *testing.T) {
+	tests := []struct {
+		name    string
+		plain   string
+		wantErr error
+	}{
+		{"empty", "", ErrWeakPassword},
+		{"seven chars fails", "1234567", ErrWeakPassword},
+		{"eight chars passes", "12345678", nil},
+		{"long passphrase passes", "correct horse battery staple", nil},
+		// bcrypt refuses anything over 72 bytes, so the boundary is a real
+		// limit of the hasher, not a taste preference. Off by one here and a
+		// person with a password manager gets a 500 instead of a message.
+		{"seventy-two bytes passes", strings.Repeat("a", 72), nil},
+		{"seventy-three bytes fails", strings.Repeat("a", 73), ErrPasswordTooLong},
+		// Bytes, not runes: accented pt-BR text costs more than it looks.
+		{"accented text counts bytes", strings.Repeat("á", 37), ErrPasswordTooLong},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePassword(tt.plain)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ValidatePassword(%q) error = %v, want %v", tt.plain, err, tt.wantErr)
 			}
 		})
 	}

@@ -20,6 +20,12 @@ type UserRepo interface {
 	Create(ctx context.Context, u identity.User) error
 	GetByID(ctx context.Context, id shared.ID) (identity.User, error)
 	GetByEmail(ctx context.Context, email shared.EmailAddress) (identity.User, error)
+	// GetPasswordHash and SetPasswordHash keep the hash out of identity.User:
+	// User is serialized into DTOs, and a hash sitting on it is one careless
+	// handler away from reaching a browser. An empty hash means no password
+	// is set (a magic-link-only account).
+	GetPasswordHash(ctx context.Context, userID shared.ID) (string, error)
+	SetPasswordHash(ctx context.Context, userID shared.ID, hash string) error
 }
 
 // ErrNotFound is what every repository returns when a record is absent, and
@@ -189,4 +195,12 @@ type TokenGen interface {
 // rolls back whatever the function wrote.
 type TxManager interface {
 	InTx(ctx context.Context, fn func(context.Context) error) error
+}
+
+// PasswordHasher hashes and verifies plaintext passwords. bcrypt is the only
+// implementation; this is a port because it crosses into internal/adapters,
+// not because more than one implementation is expected.
+type PasswordHasher interface {
+	Hash(plain string) (string, error)
+	Matches(hash, plain string) bool
 }

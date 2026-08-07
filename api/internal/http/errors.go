@@ -32,6 +32,8 @@ const (
 	codeTooLateToCancel     errorCode = "too_late_to_cancel"
 	codePaymentFailed       errorCode = "payment_failed"
 	codeRateLimited         errorCode = "rate_limited"
+	codeInvalidCredentials  errorCode = "invalid_credentials"
+	codeEmailTaken          errorCode = "email_taken"
 	codeInternal            errorCode = "internal"
 )
 
@@ -46,6 +48,8 @@ var validationErrors = []error{
 	identity.ErrInvalidRole,
 	identity.ErrInvalidTimezone,
 	identity.ErrEmptyName,
+	identity.ErrWeakPassword,
+	identity.ErrPasswordTooLong,
 	catalog.ErrInvalidProduct,
 	credit.ErrInvalidDebit,
 	leads.ErrMissingConsentIP,
@@ -70,14 +74,22 @@ func writeError(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusUnauthorized, codeUnauthenticated, "authentication required"
 	case errors.Is(err, app.ErrSessionExpired), errors.Is(err, identity.ErrInvalidToken):
 		status, code, message = http.StatusUnauthorized, codeUnauthenticated, err.Error()
+	case errors.Is(err, app.ErrInvalidCredentials):
+		// Deliberately the same status, code and message every time this
+		// sentinel is returned - see app.ErrInvalidCredentials's doc comment.
+		status, code, message = http.StatusUnauthorized, codeInvalidCredentials, err.Error()
 	case errors.Is(err, errForbidden):
 		status, code, message = http.StatusForbidden, codeForbidden, err.Error()
 	case errors.Is(err, app.ErrNoEntitlement):
 		status, code, message = http.StatusForbidden, codeForbidden, err.Error()
+	case errors.Is(err, errRateLimited):
+		status, code, message = http.StatusTooManyRequests, codeRateLimited, err.Error()
 	case errors.Is(err, ports.ErrNotFound):
 		status, code, message = http.StatusNotFound, codeNotFound, "not found"
 	case errors.Is(err, credit.ErrInsufficientCredits):
 		status, code, message = http.StatusConflict, codeInsufficientCredits, err.Error()
+	case errors.Is(err, app.ErrEmailTaken):
+		status, code, message = http.StatusConflict, codeEmailTaken, err.Error()
 	case errors.Is(err, scheduling.ErrSlotTaken):
 		status, code, message = http.StatusConflict, codeSlotTaken, err.Error()
 	case errors.Is(err, scheduling.ErrTooLateToBook):

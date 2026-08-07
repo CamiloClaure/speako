@@ -43,7 +43,7 @@ func newTestRig(t *testing.T) *testRig {
 
 	auth := app.NewAuth(
 		users, &fakes.SessionRepo{}, &fakes.LoginTokenRepo{},
-		mailer, clock, idgen, tokengen, magicBase, 30*24*time.Hour,
+		mailer, clock, idgen, tokengen, &fakes.PasswordHasher{}, magicBase, 30*24*time.Hour,
 	)
 	catalog := app.NewCatalog(&fakes.ProductRepo{})
 	booking := app.NewBooking(&fakes.CreditLedgerRepo{}, &fakes.BookingRepo{}, availability, tx, clock, idgen, app.DefaultBookingPolicy())

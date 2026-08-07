@@ -136,6 +136,22 @@ func (r *UserRepo) getUser(ctx context.Context, query string, arg any) (identity
 	return u, nil
 }
 
+// GetPasswordHash returns the bcrypt hash for userID, or "" if the account
+// has no password set (a magic-link-only account).
+func (r *UserRepo) GetPasswordHash(ctx context.Context, userID shared.ID) (string, error) {
+	var hash string
+	err := r.q(ctx).QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, string(userID)).Scan(&hash)
+	if err != nil {
+		return "", mapErr("get password hash", err)
+	}
+	return hash, nil
+}
+
+func (r *UserRepo) SetPasswordHash(ctx context.Context, userID shared.ID, hash string) error {
+	_, err := r.q(ctx).ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, string(userID))
+	return err
+}
+
 // ---------------------------------------------------------------------------
 // SessionRepo
 // ---------------------------------------------------------------------------

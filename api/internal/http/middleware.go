@@ -1,13 +1,17 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/camiloclaure/speako/api/internal/domain/identity"
@@ -218,5 +222,104 @@ func (r *Router) requireTeacher(next func(http.ResponseWriter, *http.Request, id
 			return
 		}
 		next(w, req, user)
+	}
+}
+
+const (
+	loginLimiterMax    = 5
+	loginLimiterIPMax  = 20
+	loginLimiterWindow = 15 * time.Minute
+)
+
+// loginLimiter caps sign-in and account-creation attempts in two independent
+// buckets, because one key alone stops only half of the attack:
+//
+//   - IP + email, loginLimiterMax: stops guessing one account's password.
+//     Keying on both means an attacker cannot lock a real person out of their
+//     own account by burning the budget from someone else's address.
+//   - IP alone, loginLimiterIPMax: stops password spraying, where one caller
+//     tries a single common password against hundreds of different emails.
+//     The first bucket is blind to that - each email gets its own fresh five.
+//
+// The per-IP ceiling is the looser of the two on purpose: a household or an
+// office behind one NAT shares an address, and locking out a building to slow
+// one attacker is a bad trade.
+//
+// ponytail: in-process map, per-instance; move to a shared store if we ever
+// run more than one instance.
+type loginLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
+}
+
+func newLoginLimiter() *loginLimiter {
+	return &loginLimiter{attempts: map[string][]time.Time{}}
+}
+
+// allow reports whether an attempt from ip against email may proceed at now,
+// and records it against both buckets if so. Every call also drops attempts
+// older than the window from every key, not just the ones being checked, so
+// the map cannot grow without bound even for a caller never seen again after
+// one try.
+//
+// Neither bucket is charged when the other has already refused: a caller who
+// is over one limit should not have the second limit run down as well, or a
+// blocked attacker would keep pushing a shared-NAT neighbour towards the IP
+// ceiling for free.
+func (l *loginLimiter) allow(ip, email string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cutoff := now.Add(-loginLimiterWindow)
+	for k, times := range l.attempts {
+		fresh := recentTimes(times, cutoff)
+		if len(fresh) == 0 {
+			delete(l.attempts, k)
+		} else {
+			l.attempts[k] = fresh
+		}
+	}
+	perAccount := ip + "|" + email
+	perIP := ip + "|*"
+	if len(l.attempts[perAccount]) >= loginLimiterMax || len(l.attempts[perIP]) >= loginLimiterIPMax {
+		return false
+	}
+	l.attempts[perAccount] = append(l.attempts[perAccount], now)
+	l.attempts[perIP] = append(l.attempts[perIP], now)
+	return true
+}
+
+func recentTimes(times []time.Time, cutoff time.Time) []time.Time {
+	fresh := times[:0]
+	for _, t := range times {
+		if t.After(cutoff) {
+			fresh = append(fresh, t)
+		}
+	}
+	return fresh
+}
+
+// rateLimitLogin gates next behind loginLimiter. It has to read the body to
+// find the email, so it restores req.Body afterwards - the wrapped handler
+// still needs to decode it.
+func (r *Router) rateLimitLogin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes))
+		if err != nil {
+			writeError(w, validationErrorf("invalid request body"))
+			return
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+
+		var parsed struct {
+			Email string `json:"email"`
+		}
+		_ = json.Unmarshal(body, &parsed) // malformed JSON: handler reports it, limiter just sees "".
+
+		email := strings.ToLower(strings.TrimSpace(parsed.Email))
+		if !r.loginLimiter.allow(requestIP(req), email, time.Now()) {
+			writeError(w, errRateLimited)
+			return
+		}
+		next(w, req)
 	}
 }
