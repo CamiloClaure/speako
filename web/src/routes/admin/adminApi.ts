@@ -56,13 +56,20 @@ export type AdminOrder = {
   created_at: string;
 };
 
-/** What the teacher fills in to put a product up for sale. */
+/**
+ * What the teacher fills in to put a product up for sale. No `id`, no
+ * `slug` - the server mints the id and derives the slug from `title`.
+ * `active` defaults to true server-side when omitted; only send it when a
+ * screen actually means to change it.
+ */
 export type NewProduct = {
   title: string;
   kind: "material" | "pack";
   price_cents: number;
+  file_key?: string;
   credits?: number;
   validity_days?: number;
+  active?: boolean;
 };
 
 // --- endpoints --------------------------------------------------------------

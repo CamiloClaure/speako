@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { adminApi, type AdminBooking, type AdminOrder } from "./adminApi";
-import { friendlyMessage, type Product } from "../../api/client";
+import { ApiError, friendlyMessage, type Product } from "../../api/client";
 import {
   Badge,
   Button,
@@ -436,6 +436,7 @@ type ProductForm = {
   title: string;
   kind: "material" | "pack";
   price: string;
+  fileKey: string;
   credits: string;
   validity: string;
 };
@@ -444,9 +445,20 @@ const EMPTY_FORM: ProductForm = {
   title: "",
   kind: "material",
   price: "",
+  fileKey: "",
   credits: "",
   validity: "",
 };
+
+/**
+ * The server names the offending field in `message` for validation_failed -
+ * show that verbatim instead of the generic copy friendlyMessage falls back
+ * to for every other case.
+ */
+function productErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.code === "validation_failed") return err.message;
+  return friendlyMessage(err);
+}
 
 export function AdminProdutos() {
   const [products, setProducts] = useState<Product[] | null>(null);
@@ -480,13 +492,13 @@ export function AdminProdutos() {
         price_cents: priceCents,
         ...(form.kind === "pack"
           ? { credits: Number(form.credits), validity_days: Number(form.validity) }
-          : {}),
+          : { file_key: form.fileKey.trim() }),
       });
       setCreated(true);
       setForm(EMPTY_FORM);
       setProducts(await adminApi.products());
     } catch (err) {
-      setError(friendlyMessage(err));
+      setError(productErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -503,13 +515,17 @@ export function AdminProdutos() {
         <EmptyState title="Nenhum produto ainda" description="Crie seu primeiro produto abaixo." />
       ) : (
         <section className="flex flex-col gap-3">
-          <h2 className="text-xl">À venda</h2>
+          <h2 className="text-xl">Produtos</h2>
           {products.map((p) => (
-            <Card key={p.id} className="flex flex-wrap items-center justify-between gap-3">
+            <Card
+              key={p.id}
+              className={`flex flex-wrap items-center justify-between gap-3 ${p.active ? "" : "opacity-60"}`}
+            >
               <div className="flex flex-col gap-1">
                 <p className="font-semibold">{p.title}</p>
                 <div className="flex items-center gap-2">
                   <Badge tone={p.kind === "pack" ? "accent" : "brand"}>{KIND_LABELS[p.kind]}</Badge>
+                  {!p.active && <Badge tone="muted">Fora de venda</Badge>}
                   {p.kind === "pack" && p.credits !== undefined && (
                     <span className="text-sm text-subtle">
                       {p.credits} {p.credits === 1 ? "crédito" : "créditos"}
@@ -556,6 +572,16 @@ export function AdminProdutos() {
             error={priceError ?? undefined}
             hint="Aceitamos 47,00 e 47.00."
           />
+          {form.kind === "material" && (
+            <Field
+              label="Arquivo"
+              value={form.fileKey}
+              onChange={(e) => setForm({ ...form, fileKey: e.target.value })}
+              placeholder="ingles-basico.pdf"
+              hint="O nome do arquivo que você enviou para este material."
+              required
+            />
+          )}
           {form.kind === "pack" && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field

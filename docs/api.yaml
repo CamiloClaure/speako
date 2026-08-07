@@ -678,10 +678,28 @@ paths:
         default: { $ref: "#/components/responses/UnexpectedError" }
 
   /api/v1/admin/products:
+    get:
+      tags: [admin]
+      operationId: adminListProducts
+      summary: List every product, including inactive ones.
+      description: >
+        Unlike the public catalogue, this includes products with
+        `active: false` - seeing what is off sale is the point of this
+        screen.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: All products, active and inactive.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        default: { $ref: "#/components/responses/UnexpectedError" }
     post:
       tags: [admin]
       operationId: adminUpsertProduct
-      summary: Create or update a material or pack.
+      summary: Create a new material or pack, or update an existing one when `id` is supplied.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -1083,23 +1101,35 @@ components:
 
     AdminProductInput:
       type: object
-      description: The price arrives as integer cents; converting from reais is the client's job.
-      required: [id, slug, title, price_cents, kind, active]
+      description: >
+        The price arrives as integer cents; converting from reais is the
+        client's job. The server mints `id` and derives `slug` from `title` -
+        never send a `slug`. Omit `id` to create a new product; supply an
+        existing product's `id` to update it instead.
+      required: [title, kind, price_cents]
       properties:
-        id: { type: string }
-        slug: { type: string }
+        id:
+          type: string
+          description: Omit to create a new product. Supply an existing product's id to update it.
         title: { type: string }
-        price_cents: { type: integer, format: int64 }
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 1
         kind:
           type: string
           enum: [material, pack]
         file_key:
           type: string
-          description: Storage key for a material's file. Only meaningful for kind=material.
+          description: Required when kind=material - the stored file's key.
         credits:
           type: integer
-          description: Only meaningful for kind=pack.
+          minimum: 1
+          description: Required when kind=pack.
         validity_days:
           type: integer
-          description: Only meaningful for kind=pack; 0 means it never expires.
-        active: { type: boolean }
+          description: Only meaningful for kind=pack; omitted means the pack never expires.
+        active:
+          type: boolean
+          default: true
+          description: Optional; defaults to true when omitted.
