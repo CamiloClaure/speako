@@ -20,6 +20,9 @@ export type ErrorCode =
   | "too_late_to_cancel"
   | "payment_failed"
   | "rate_limited"
+  | "invalid_credentials"
+  | "email_taken"
+  | "not_implemented"
   | "internal";
 
 export class ApiError extends Error {
@@ -42,6 +45,9 @@ const MESSAGES: Partial<Record<ErrorCode, string>> = {
   too_late_to_cancel: "Faltam menos de 24h para a aula.",
   rate_limited: "Muitas tentativas. Aguarde um minuto e tente de novo.",
   not_found: "Não encontramos o que você procura.",
+  invalid_credentials: "E-mail ou senha incorretos.",
+  email_taken: "Este e-mail já tem conta. Entre com sua senha ou peça um link.",
+  not_implemented: "Este modo de entrar ainda não está disponível.",
   internal: "Tivemos um problema aqui. Tente novamente em instantes.",
 };
 
@@ -139,6 +145,24 @@ export const api = {
     request<{ status: string }>("/auth/magic-link", {
       method: "POST",
       body: JSON.stringify({ email }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<{ status: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  register: (email: string, name: string, password: string) =>
+    request<{ status: string }>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, name, password }),
+    }),
+
+  googleSignIn: (idToken: string) =>
+    request<{ status: string }>("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ id_token: idToken }),
     }),
 
   verifyMagicLink: (token: string) =>
