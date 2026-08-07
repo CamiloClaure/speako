@@ -177,7 +177,8 @@ func TestUpsertProductCreatesThenUpdates(t *testing.T) {
 		t.Fatalf("after create got %+v, want exactly %s", all, p1.ID)
 	}
 
-	p2, err := catalog.NewProduct(h.idgen.NewID(), "pack-basico", "Pacote Básico (reajuste)", shared.NewMoney(24900), catalog.KindPack, "", 4, 90)
+	// Same ID: an edit of the product she already has.
+	p2, err := catalog.NewProduct(p1.ID, "pack-basico", "Pacote Básico (reajuste)", shared.NewMoney(24900), catalog.KindPack, "", 4, 90)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +198,43 @@ func TestUpsertProductCreatesThenUpdates(t *testing.T) {
 	}
 	if got.Title != p2.Title || got.Price != p2.Price {
 		t.Fatalf("updated product = %+v, want %q at %d", got, p2.Title, p2.Price)
+	}
+}
+
+// Matching used to be by slug, so a second product whose title derived to the
+// same slug quietly replaced the first: the teacher got a success and lost the
+// product she already had. A different product claiming a taken slug is now
+// refused, because the slug is that product's public URL.
+func TestUpsertProductRefusesASlugAnotherProductOwns(t *testing.T) {
+	h := newTeacherHarness(t)
+	ctx := context.Background()
+
+	first, err := catalog.NewProduct(h.idgen.NewID(), "pack-basico", "Pacote Básico", shared.NewMoney(19900), catalog.KindPack, "", 4, 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.uc.UpsertProduct(ctx, first); err != nil {
+		t.Fatalf("seeding the first product: %v", err)
+	}
+
+	// A genuinely different product that happens to derive the same slug.
+	second, err := catalog.NewProduct(h.idgen.NewID(), "pack-basico", "Pacote Básico", shared.NewMoney(99900), catalog.KindPack, "", 8, 180)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.uc.UpsertProduct(ctx, second); !errors.Is(err, catalog.ErrSlugTaken) {
+		t.Fatalf("UpsertProduct with a taken slug = %v, want ErrSlugTaken", err)
+	}
+
+	all, err := h.products.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("got %d products, want the original left alone", len(all))
+	}
+	if all[0].ID != first.ID || all[0].Price != first.Price {
+		t.Fatalf("original product = %+v, want %s untouched at %d", all[0], first.ID, first.Price)
 	}
 }
 

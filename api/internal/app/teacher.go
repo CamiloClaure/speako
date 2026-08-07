@@ -146,17 +146,28 @@ func (uc *Teacher) ListProducts(ctx context.Context) ([]catalog.Product, error) 
 	return uc.products.List(ctx)
 }
 
-// UpsertProduct creates the product or, when one with the same slug already
-// exists, updates it in place so references to the old ID keep working.
+// UpsertProduct updates the product with this ID, or creates it when there is
+// no such product. Matching is by ID and never by slug: the slug is derived
+// from the title, so matching on it meant a second product sharing a title
+// silently replaced the first - the teacher saw 201 Created and lost the
+// product she already had.
+//
+// A slug still has to be unique, because it is the product's public URL, so a
+// collision with a *different* product is refused rather than resolved.
 func (uc *Teacher) UpsertProduct(ctx context.Context, p catalog.Product) error {
-	existing, err := uc.products.GetBySlug(ctx, p.Slug)
+	if clash, err := uc.products.GetBySlug(ctx, p.Slug); err == nil && clash.ID != p.ID {
+		return catalog.ErrSlugTaken
+	} else if err != nil && !errors.Is(err, ports.ErrNotFound) {
+		return err
+	}
+
+	_, err := uc.products.GetByID(ctx, p.ID)
 	if errors.Is(err, ports.ErrNotFound) {
 		return uc.products.Create(ctx, p)
 	}
 	if err != nil {
 		return err
 	}
-	p.ID = existing.ID
 	return uc.products.Update(ctx, p)
 }
 

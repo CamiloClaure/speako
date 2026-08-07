@@ -24,6 +24,10 @@ var (
 	// maps to the same 422 validation_failed response without touching
 	// internal/http/errors.go.
 	ErrEmptySlug = shared.NewDomainError("product.invalid", "title must contain at least one letter or number to derive a slug")
+	// ErrSlugTaken is returned when a different product already owns the slug
+	// this title derives to. The slug is the product's public URL, so two
+	// products cannot share one.
+	ErrSlugTaken = shared.NewDomainError("product.invalid", "another product already uses this title")
 )
 
 // Kind discriminates the two things the shop sells.
