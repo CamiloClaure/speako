@@ -26,7 +26,11 @@ export function Landing() {
       <Hero />
       <HowItWorks />
 
-      <section id="aulas" className="mx-auto w-full max-w-5xl px-5 py-16">
+      {/* The one section that breaks the column. Everything else on this page
+          sat at max-w-5xl with identical padding, which is what made the page
+          read as a stack of interchangeable slabs. The packs are what the page
+          is selling, so this is the one that gets to be wider. */}
+      <section id="aulas" className="mx-auto w-full max-w-6xl px-5 py-20">
         <h2 className="text-3xl">Pacotes de aulas particulares</h2>
         <p className="mt-2 text-muted">
           Compre um pacote, agende no horário que quiser. Os créditos são seus.
@@ -42,7 +46,7 @@ export function Landing() {
       </section>
 
       <section id="materiais" className="bg-surface">
-        <div className="mx-auto w-full max-w-5xl px-5 py-16">
+        <div className="mx-auto w-full max-w-5xl px-5 py-12">
           <h2 className="text-3xl">Materiais</h2>
           <p className="mt-2 text-muted">Para estudar sozinho, no seu ritmo.</p>
           <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -82,6 +86,15 @@ function Hero() {
   );
 }
 
+/**
+ * Three equal columns, each a numbered circle above a heading above two lines,
+ * is the icon-tile card with a digit where the icon goes. The content really is
+ * ordinal, so the numbering stays - what goes is the card shape and the equal
+ * thirds. It reads as a sequence now, which is what it always was.
+ *
+ * The number sits inline with the heading rather than in a column of its own:
+ * a label in a narrow left column with the title beside it is its own tell.
+ */
 function HowItWorks() {
   const steps = [
     ["Escolha seu pacote", "4, 8 ou 12 aulas. Pague com Pix ou cartão parcelado."],
@@ -90,16 +103,23 @@ function HowItWorks() {
   ];
   return (
     <section className="bg-brand-50">
-      <div className="mx-auto grid w-full max-w-5xl gap-6 px-5 py-14 sm:grid-cols-3">
-        {steps.map(([title, body], i) => (
-          <div key={title} className="flex flex-col gap-2">
-            <span className="flex size-10 items-center justify-center rounded-full bg-brand-600 font-display text-lg font-bold text-white">
-              {i + 1}
-            </span>
-            <h3 className="font-display text-lg font-bold">{title}</h3>
-            <p className="text-muted">{body}</p>
-          </div>
-        ))}
+      <div className="mx-auto w-full max-w-4xl px-5 py-16">
+        <ol className="flex flex-col">
+          {steps.map(([title, body], i) => (
+            <li
+              key={title}
+              className="border-t-2 border-brand-200 py-6 first:border-t-0 first:pt-0"
+            >
+              <h3 className="flex items-baseline gap-3 font-display text-xl font-bold">
+                <span className="text-3xl text-brand-600 tabular-nums">{i + 1}</span>
+                {title}
+              </h3>
+              {/* Indented to the heading's text, not to the number - the body
+                  belongs to the title, not to the digit. */}
+              <p className="mt-1 max-w-xl text-muted sm:ml-11">{body}</p>
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   );
@@ -155,7 +175,7 @@ function LeadMagnet() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-3xl px-5 py-16">
+    <section className="mx-auto w-full max-w-3xl px-5 py-24">
       <Card className="flex flex-col gap-4">
         <h2 className="text-2xl">Guia grátis: 50 erros que todo brasileiro comete</h2>
         {state === "sent" ? (
@@ -210,7 +230,7 @@ function Faq() {
   ];
   return (
     <section className="bg-surface">
-      <div className="mx-auto w-full max-w-3xl px-5 py-16">
+      <div className="mx-auto w-full max-w-3xl px-5 py-14">
         <h2 className="text-3xl">Perguntas frequentes</h2>
         <div className="mt-6 flex flex-col gap-3">
           {items.map(([q, a]) => (
