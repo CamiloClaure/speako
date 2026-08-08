@@ -116,26 +116,33 @@ function TeacherOnly({ children }: { children: ReactNode }) {
 function Header() {
   const { user, signOut } = useSession();
   return (
-    <header className="sticky top-0 z-40 border-b-2 border-line bg-canvas/95 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-5 py-3">
+    /* A floating pill rather than a full-bleed bar with a hairline underline.
+       That bar is the same object on a bakery and a B2B SaaS - it tells you
+       nothing about where you are. The pill leans on the chunky shadow that is
+       already this system's signature, and leaves the page edge visible so the
+       header reads as an object on the page instead of a lid over it. */
+    <header className="sticky top-3 z-40 px-3 sm:top-4 sm:px-5">
+      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-xl border-2 border-line bg-canvas/90 px-4 py-2.5 shadow-chunk backdrop-blur">
         <Link to="/" className="font-display text-2xl font-bold tracking-tight">
           Speako
         </Link>
-        <nav className="flex items-center gap-2">
+        {/* whitespace-nowrap everywhere: a nav label that wraps to two lines
+            reads as a styling error, and these are the narrow-viewport risk. */}
+        <nav className="flex items-center gap-1 sm:gap-2">
           {user ? (
             <>
               {user.role === "student" && (
                 <>
-                  <Link to="/painel" className="px-3 py-2 font-semibold text-muted hover:text-ink">
+                  <Link to="/painel" className="whitespace-nowrap rounded-lg px-2 py-2 font-semibold text-muted hover:text-ink sm:px-3">
                     Painel
                   </Link>
-                  <Link to="/painel/aulas" className="px-3 py-2 font-semibold text-muted hover:text-ink">
+                  <Link to="/painel/aulas" className="whitespace-nowrap rounded-lg px-2 py-2 font-semibold text-muted hover:text-ink sm:px-3">
                     Aulas
                   </Link>
                 </>
               )}
               {(user.role === "teacher" || user.role === "admin") && (
-                <Link to="/admin/agenda" className="px-3 py-2 font-semibold text-brand-700 hover:text-brand-800">
+                <Link to="/admin/agenda" className="whitespace-nowrap rounded-lg px-2 py-2 font-semibold text-brand-700 hover:text-brand-800 sm:px-3">
                   Admin
                 </Link>
               )}
